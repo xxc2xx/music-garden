@@ -1,6 +1,6 @@
 # Music Garden
 
-A music app for Winston's daughter (4, Yamaha Junior Music Course since 3):
+A music app for the founder's daughter (4, Yamaha Junior Music Course since 3):
 her class book on a real staff, play-along with Taiko-style beat scoring, and
 a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
 
@@ -9,9 +9,14 @@ a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
 - `index.html` (markup, CSS, inline SVG art) + `garden.js` (all logic,
   classic script → `window.Garden`). No backend, no npm, no build step.
 - Vendored from `~/pitch-trainer`: `music-core.js`, `hear.js`, `midi.js`,
-  `sound.js`. **Never edit them here** — edit in pitch-trainer, then run its
-  `tools/sync-core.sh` (copies into beat-hive and here). `tools/qc.js` fails
-  on drift.
+  `sound.js`, pinned by `vendor.lock.json` (version, sha256, source commit,
+  and the engine names this app uses). **Never edit them here** — a local
+  edit fails `tools/shared.mjs verify`. Edit in pitch-trainer, run its
+  `tools/consumers-test.sh` (proves the change against this repo's gate),
+  then `tools/sync-core.sh`. The source being newer only warns.
+- `garden-core.js` = pure logic (node-tested), `garden-rules.js` = learning
+  thresholds as versioned data (initial heuristics, bump `version` on any
+  change), `garden.js` = the app.
 - Same origin as Pitch Trainer and Beat Hive (`xxc2xx.github.io`), so
   `localStorage` is shared: Garden uses `garden_v1`; it reads Pitch Trainer's
   speaker calibration `musicEco_latencyMs`. `sw.js` only deletes caches
@@ -42,8 +47,17 @@ press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
 ## Rules
 
 - **Staging only.** Work on `dev`. `main` is the deploy branch: `staging/`
-  (+ README). Nothing goes to the root of `main` until Winston says go live.
-- Release: `node tools/qc.js` → Codex review
+  (+ README). Nothing goes to the root of `main` until the parent says go live.
+- Gate: `sh tools/gate.sh` = `qc.js` (syntax, lock + API, sw list, unique
+  ids) + `garden-test.mjs` (pure logic) + `exec-check.mjs` (boots the real
+  scripts in a fake DOM with fake time; failure injection: storage throws /
+  full / corrupt data, callbacks after leaving a screen). Known bugs sit in
+  its `XFAIL` list with their audit id until their PR fixes them.
+- `?debug=1` shows a live diagnostics panel (screen, run, audio, input,
+  MIDI, mic, rules version, last errors). Errors are always kept in a
+  30-entry memory ring buffer — no audio, photos or child data.
+- V2 plan and audit: `docs/plan/00-overview.md` (PR0–PR8, data contracts).
+- Release: `sh tools/gate.sh` → Codex review
   (`~/busy-brain/claude-config/hooks/codex-review-run.sh ~/music-garden`) →
   push `dev` → `tools/stage.sh ~/music-garden dev <files…>` →
   `git -C $TMPDIR/stage-music-garden push origin HEAD:main`.

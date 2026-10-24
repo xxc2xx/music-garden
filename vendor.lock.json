@@ -1,0 +1,55 @@
+{
+  "source": "pitch-trainer",
+  "sourceCommit": "5cc2b2c",
+  "syncedAt": "2026-10-24T14:13:39.753Z",
+  "modules": {
+    "music-core.js": {
+      "version": "1.1.0",
+      "sha256": "899405dd2a7c63784654317e73defdb0c30450a1d19f4ac85ba193080b8da5ea",
+      "uses": [
+        "CLEF_SHIFT",
+        "PALETTE",
+        "SOLFEGE",
+        "addDays",
+        "colorOf",
+        "dayKey",
+        "env",
+        "isBlack",
+        "midiToFreq",
+        "pc",
+        "staffStep"
+      ]
+    },
+    "hear.js": {
+      "version": "1.0.0",
+      "sha256": "c1b691403bb53654d5f2b59c1895b5dd9ac8a00307553cf557c8b7850e1473a2",
+      "uses": [
+        "mpm",
+        "pitchTracker"
+      ]
+    },
+    "midi.js": {
+      "version": "1.0.0",
+      "sha256": "343e0117b085b25efa1b80e2be2156862496ac969a8403a71f2f12c72b800d98",
+      "uses": [
+        "autoConnect",
+        "connect",
+        "connected",
+        "onNote",
+        "onStatus",
+        "supported"
+      ]
+    },
+    "sound.js": {
+      "version": "1.0.0",
+      "sha256": "c253162c7278de02acbf8bbed6b19a108c4e3eacb3fc7a957aac353d8079d952",
+      "uses": [
+        "cancel",
+        "noteOff",
+        "noteOn",
+        "schedule",
+        "use"
+      ]
+    }
+  }
+}

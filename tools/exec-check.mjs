@@ -1,0 +1,170 @@
+// node tools/exec-check.mjs — boots the REAL app scripts (vendored engine +
+// garden-rules/core + garden.js) in a fake DOM with fake time, then injects
+// failures. Catches what a parse check can't: init-order (TDZ) errors, null
+// lookups, storage that throws, corrupt saved data, and callbacks that fire
+// after the child has left a screen.
+//
+// Known bugs are listed in XFAIL with their audit id: they are EXPECTED to
+// fail until their PR lands. If one starts passing, the gate tells you to
+// move it out of XFAIL (so a fix can't silently regress later).
+import fs from 'fs';
+import path from 'path';
+import vm from 'vm';
+import { fileURLToPath } from 'url';
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPTS = (fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').match(/<script src="([\w.-]+\.js)"><\/script>/g) || [])
+  .map(t => t.match(/src="([^"]+)"/)[1]);
+const XFAIL = {
+  'G1: quiz auto-advance after Home': 'PR1',
+  'G2: Learn finish after Home': 'PR1',
+};
+
+// ── fake DOM ─────────────────────────────────────────────────────────────
+class ClassList { constructor(){ this.s = new Set(); } add(...c){ c.forEach(x => this.s.add(x)); } remove(...c){ c.forEach(x => this.s.delete(x)); }
+  toggle(c, f){ const on = f === undefined ? !this.s.has(c) : !!f; on ? this.s.add(c) : this.s.delete(c); return on; } contains(c){ return this.s.has(c); } }
+function makeEnv(opts){
+  opts = opts || {};
+  const reg = new Map(), created = [];
+  let clock = 0, seq = 0; const timers = new Map();
+  const spoken = [];
+  class El {
+    constructor(tag, id){ this.tagName = String(tag).toUpperCase(); this.id = id || ''; this.hidden = false; this.dataset = {}; this.attrs = {};
+      this.listeners = {}; this.children = []; this._html = ''; this.textContent = ''; this.classList = new ClassList(); this.value = ''; this.checked = false;
+      this.clientWidth = 900; this.clientHeight = 600; this.scrollLeft = 0; this.parentNode = null;
+      this.style = { setProperty(){}, removeProperty(){}, cssText: '' }; }
+    get className(){ return [...this.classList.s].join(' '); } set className(v){ this.classList = new ClassList(); String(v).split(/\s+/).filter(Boolean).forEach(c => this.classList.add(c)); }
+    get innerHTML(){ return this._html; } set innerHTML(v){ this._html = String(v); this.children = []; }
+    insertAdjacentHTML(_, h){ this._html += h; }
+    appendChild(c){ this.children.push(c); c.parentNode = this; return c; }
+    addEventListener(t, f){ (this.listeners[t] = this.listeners[t] || []).push(f); } removeEventListener(){}
+    fire(t, ev){ (this.listeners[t] || []).slice().forEach(f => f(Object.assign({ type: t, target: this, preventDefault(){}, detail: 1, pointerId: 1 }, ev || {}))); }
+    click(){ this.fire('click'); }
+    querySelector(sel){ return sel.startsWith('#') ? doc.getElementById(sel.slice(1)) : new El('div'); }
+    querySelectorAll(){ return []; }
+    setAttribute(k, v){ this.attrs[k] = String(v); } getAttribute(k){ return k in this.attrs ? this.attrs[k] : null; } removeAttribute(k){ delete this.attrs[k]; }
+    getBoundingClientRect(){ return { left: 0, top: 0, width: 100, height: 100 }; } getBBox(){ return { x: 0, y: 0, width: 10, height: 10 }; }
+    setPointerCapture(){} releasePointerCapture(){} focus(){} remove(){}
+    getContext(){ return { font: '', measureText: () => ({ actualBoundingBoxAscent: 75, actualBoundingBoxDescent: 25, actualBoundingBoxLeft: 0 }) }; }
+    play(){ return Promise.resolve(); } pause(){}
+  }
+  const homes = [0, 1, 2, 3].map(i => new El('button', 'home' + i));
+  const doc = {
+    body: new El('body'), hidden: false,
+    getElementById(id){ if(!reg.has(id)) reg.set(id, new El('div', id)); return reg.get(id); },
+    querySelector(sel){ return sel.startsWith('#') ? doc.getElementById(sel.slice(1)) : new El('div'); },
+    querySelectorAll(sel){ return sel === '.home' ? homes : []; },
+    createElement(tag){ const e = new El(tag); created.push(e); return e; },
+    createRange(){ return { selectNodeContents(){} }; },
+    addEventListener(){}, removeEventListener(){},
+  };
+  const store = {};
+  const ls = opts.storage === 'throws'
+    ? { getItem(){ throw new Error('SecurityError'); }, setItem(){ throw new Error('SecurityError'); }, removeItem(){ throw new Error('SecurityError'); } }
+    : { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { if(opts.storage === 'quota') throw Object.assign(new Error('QuotaExceededError'), { name: 'QuotaExceededError' }); store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+  Object.assign(store, opts.seed || {});
+  const win = {
+    document: doc, localStorage: ls, console: { log(){}, warn(){}, error(){} },
+    location: { pathname: '/music-garden/', search: '?env=test', hostname: 'example.test' },
+    navigator: {}, performance: { now: () => clock },
+    setTimeout: (f, ms) => { const id = ++seq; timers.set(id, { t: clock + (ms || 0), f }); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    setInterval: (f, ms) => { const id = ++seq; timers.set(id, { t: clock + ms, f, every: ms }); return id; },
+    clearInterval: (id) => timers.delete(id),
+    requestAnimationFrame: (f) => win.setTimeout(() => f(clock), 16), cancelAnimationFrame: (id) => timers.delete(id),
+    speechSynthesis: { speak(u){ spoken.push(u.text); }, cancel(){}, speaking: false },
+    SpeechSynthesisUtterance: class { constructor(t){ this.text = t; } },
+    getSelection: () => ({ removeAllRanges(){}, addRange(){} }),
+    addEventListener(){}, removeEventListener(){},
+  };
+  win.window = win; win.self = win;
+  const ctx = vm.createContext(win);
+  const advance = (ms) => {
+    const end = clock + ms;
+    for(;;){
+      let next = null; for(const [id, t] of timers) if(t.t <= end && (!next || t.t < next[1].t)) next = [id, t];
+      if(!next) break;
+      const [id, t] = next; clock = t.t;
+      if(t.every) t.t += t.every; else timers.delete(id);
+      t.f();
+    }
+    clock = end;
+  };
+  return { win, ctx, doc, reg, created, spoken, store, advance, homes,
+    $: (id) => doc.getElementById(id), boot(){ for(const f of SCRIPTS) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f }); } };
+}
+
+// ── tests ────────────────────────────────────────────────────────────────
+let fail = 0;
+const result = (name, pass, detail) => {
+  const x = XFAIL[name];
+  if(x){ console.log(pass ? `  XPASS ${name} — fixed? move it out of XFAIL (${x})` : `  xfail ${name} (known, fix in ${x})`); if(pass) fail++; return; }
+  console.log((pass ? '  ok    ' : '  FAIL  ') + name + (pass || !detail ? '' : ' — ' + detail)); if(!pass) fail++;
+};
+function test(name, opts, fn){
+  const env = makeEnv(opts);
+  try{ env.boot(); }catch(e){ return result(name, false, 'boot threw: ' + e.message); }
+  try{ const r = fn(env); result(name, r === true, typeof r === 'string' ? r : ''); }catch(e){ result(name, false, 'threw: ' + e.message); }
+}
+// answer the current quiz question correctly (tries the newest answer buttons)
+function answerQuiz(env){
+  const btns = env.created.filter(e => e.classList.contains('ans') || e.classList.contains('choice')).slice(-3);
+  for(const b of btns){ b.click(); if(/Yes/.test(env.$('quizFb').innerHTML)) return true; }
+  return false;
+}
+
+test('boots: home shown, Garden defined, env=test', {}, (env) =>
+  !!env.win.Garden && env.$('home').hidden === false && env.$('quiz').hidden === true && env.win.MusicCore.env() === 'test' || 'bad boot state');
+
+test('boots with localStorage throwing (private mode / blocked)', { storage: 'throws' }, (env) => {
+  env.$('tQuiz').click(); env.advance(100);
+  return env.$('quiz').hidden === false && answerQuiz(env) || 'quiz not usable without storage';
+});
+
+test('boots when storage is full (QuotaExceeded on write)', { storage: 'quota' }, (env) => {
+  env.$('tQuiz').click(); return answerQuiz(env) || 'quiz not usable on a full disk';
+});
+
+test('corrupt saved data → defaults', { seed: { garden_v1: '{{not json' } }, (env) =>
+  env.win.Garden._state().settings.tempo === 76 || 'settings not defaulted');
+
+test('wrong-typed saved data → defaults', { seed: { garden_v1: JSON.stringify({ settings: 5, songs: 'x', quiz: null, days: {}, berries: 'lots' }) } }, (env) => {
+  const s = env.win.Garden._state();
+  return (s.settings.tempo === 76 && typeof s.songs === 'object' && !Array.isArray(s.songs) && Array.isArray(s.days) && typeof s.berries === 'number') || 'wrong types survived: ' + JSON.stringify({ songs: typeof s.songs, days: Array.isArray(s.days), berries: typeof s.berries });
+});
+
+test('G1: quiz auto-advance after Home', {}, (env) => {
+  env.$('tQuiz').click();
+  if(!answerQuiz(env)) return 'could not answer';
+  const said = env.spoken.length;
+  env.homes[0].click();                     // she leaves straight after a right answer
+  env.advance(2500);
+  return (env.spoken.length === said && env.$('home').hidden === false && env.$('done').hidden === true) || `after Home: spoke ${env.spoken.length - said} more, done shown=${!env.$('done').hidden}`;
+});
+
+test('G2: Learn finish after Home', {}, (env) => {
+  env.$('tBook').click();
+  const song = env.created.find(e => e.classList.contains('song')); song.click();
+  env.$('mLearn').click();
+  [60, 62, 60].forEach(m => env.win.Garden._press(m));
+  env.homes[0].click();
+  env.advance(1000);
+  return !env.win.Garden._state().songs.drd || 'recorded a Learn result after she left';
+});
+
+test('Play! run ends cleanly when she leaves mid-song', {}, (env) => {
+  env.$('tBook').click();
+  env.created.find(e => e.classList.contains('song')).click();
+  env.$('mPlay').click(); env.advance(1500);
+  env.homes[0].click(); env.advance(8000);
+  return (env.win.Garden._run() === null && env.$('result').hidden !== false) || 'run still alive after Home';
+});
+
+test('no uncaught errors recorded during these flows', {}, (env) => {
+  env.$('tQuiz').click(); answerQuiz(env); env.advance(2000);
+  env.$('tPiano').click(); env.win.Garden._press(64);
+  return env.win.Garden._errors().length === 0 || JSON.stringify(env.win.Garden._errors());
+});
+
+console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');
+process.exit(fail ? 1 : 0);
