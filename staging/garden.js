@@ -23,60 +23,8 @@
   const $ = (s) => document.querySelector(s);
   const now = () => performance.now() / 1000;
 
-  /* ── Her book, in class order (fixed do: do = C). [midi, beats], null = rest ── */
-  const SONGS = [
-    { id: 'drd', title: 'Do Re Do', clef: 'G', time: 'C', notes: [[60,1],[62,1],[60,1],[null,1]] },
-    { id: 'drm', title: 'Up to Mi', clef: 'G', time: 'C', notes: [[60,1],[62,1],[64,1],[null,1]] },
-    { id: 'mrd', title: 'Down from Mi', clef: 'G', time: 'C', notes: [[64,1],[62,1],[60,1],[null,1]] },
-    { id: 'hcb', title: 'Hot Cross Buns', clef: 'G', time: [2,4],
-      notes: [[64,1],[62,1],[60,1],[null,1],[64,1],[62,1],[60,1],[null,1],[60,1],[60,1],[62,1],[62,1],[64,1],[62,1],[60,1],[null,1]] },
-    { id: 'fa', title: 'Up to Fa and back', clef: 'G', time: 'C', notes: [[60,1],[62,1],[64,1],[65,1],[64,1],[62,1],[60,1],[null,1]] },
-    { id: 'sol', title: 'Steps to Sol', clef: 'G', time: 'C',
-      notes: [[60,1],[62,1],[64,1],[null,1],[64,1],[65,1],[67,1],[null,1],[67,1],[65,1],[64,1],[null,1],[64,1],[62,1],[60,1],[null,1]] },
-    { id: 'hill', title: 'Five-finger hill', clef: 'G', time: 'C', notes: [[60,1],[62,1],[64,1],[65,1],[67,4],[67,1],[65,1],[64,1],[62,1],[60,4]] },
-    { id: 'low', title: 'Low hill (left hand)', clef: 'F', time: 'C', notes: [[48,1],[50,1],[52,1],[53,1],[55,4],[55,1],[53,1],[52,1],[50,1],[48,4]] },
-  ];
-  const beatsPerBar = (song) => song.time === 'C' ? 4 : song.time[0];
-  function targetsOf(song){
-    let beat = 0; const out = [];
-    song.notes.forEach(([m, b], i) => { if(m != null) out.push({ i, m, beat, b }); beat += b; });
-    return out;
-  }
-  const songBeats = (song) => song.notes.reduce((a, n) => a + n[1], 0);
-
-  /* ── Scoring (pure) ── */
-  const WIN = { great: 110, good: 230 };
-  const POINTS = { great: 100, good: 75, ok: 40, wrong: 0, miss: 0 };
-  function verdictOf(dtMs, wrongTry){
-    const a = Math.abs(dtMs);
-    let v = a <= WIN.great ? 'great' : a <= WIN.good ? 'good' : 'ok';
-    if(wrongTry) v = v === 'great' ? 'good' : 'ok';
-    return v;
-  }
-  function scoreOf(judged){
-    if(!judged.length) return 0;
-    return Math.round(judged.reduce((a, j) => a + POINTS[j ? j.v : 'miss'], 0) / judged.length);
-  }
-  const berriesFor = (pct) => pct >= 85 ? 3 : pct >= 60 ? 2 : pct >= 30 ? 1 : 0;
-  function timingSummary(judged){
-    const dts = judged.filter(j => j && j.dt != null && j.v !== 'wrong').map(j => j.dt);
-    if(dts.length < 2) return { bias: 0, sd: 0, n: dts.length, text: '' };
-    const mean = dts.reduce((a, b) => a + b, 0) / dts.length;
-    const sd = Math.sqrt(dts.reduce((a, b) => a + (b - mean) ** 2, 0) / dts.length);
-    const text = Math.abs(mean) < 45 ? 'Right on the beat!'
-      : mean < 0 ? 'A little early — wait for the click.' : 'A little late — get ready a bit sooner.';
-    return { bias: Math.round(mean), sd: Math.round(sd), n: dts.length, text };
-  }
-  // two wrong answers for a note: nearest scale neighbours first, all different names
-  function distractors(m, pool, rnd){
-    rnd = rnd || Math.random;
-    const same = pool.filter(x => (x < 60) === (m < 60) && MC.pc(x) !== MC.pc(m));
-    const byDist = same.slice().sort((a, b) => (Math.abs(a - m) - Math.abs(b - m)) || (rnd() - 0.5));
-    const near = byDist.slice(0, 3);
-    const out = [];
-    while(out.length < 2 && near.length){ out.push(near.splice(Math.floor(rnd() * near.length), 1)[0]); }
-    return out;
-  }
+  const { SONGS, beatsPerBar, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors } = window.GardenCore;
+  const WIN = window.GardenCore.WIN, POINTS = window.GardenCore.POINTS;
 
   /* ── State ── */
   const KEY = 'garden_v1';
@@ -86,9 +34,15 @@
   function load(){
     let s = null;
     try{ s = JSON.parse(localStorage.getItem(KEY)); }catch(e){}
-    s = s && typeof s === 'object' ? s : {};
-    s.settings = Object.assign({}, DEFAULTS, s.settings || {});
-    s.songs = s.songs || {}; s.quiz = s.quiz || {}; s.days = s.days || []; s.berries = s.berries || 0;
+    // anything of the wrong shape falls back to its default (G9)
+    const obj = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    s = obj(s);
+    const st = Object.assign({}, DEFAULTS);
+    Object.entries(obj(s.settings)).forEach(([k, v]) => { if(k in DEFAULTS && typeof v === typeof DEFAULTS[k]) st[k] = v; });
+    s.settings = st;
+    s.songs = obj(s.songs); s.quiz = obj(s.quiz);
+    s.days = Array.isArray(s.days) ? s.days.filter(d => typeof d === 'string') : [];
+    s.berries = Number.isFinite(s.berries) && s.berries >= 0 ? Math.floor(s.berries) : 0;
     return s;
   }
   function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
@@ -471,7 +425,7 @@
 
   // Listen: the app plays the tune with the playhead
   $('#mListen').addEventListener('click', () => {
-    const c = actx(); stopRun(); resetPaint(); $('#result').hidden = true;
+    const c = actx(); if(!c){ toast('Sound is not available on this device'); return; } stopRun(); resetPaint(); $('#result').hidden = true;
     const spb = 60 / S().tempo, t0 = c.currentTime + 0.5, off = now() - c.currentTime, lat = latencySec();
     const r = run = { mode: 'listen', alive: true, timers: [], spb, beat0: t0 + off + lat };
     targetsOf(cur).forEach(t => {
@@ -539,7 +493,7 @@
   // Play! — the beat game
   $('#mPlay').addEventListener('click', () => startPlay());
   function startPlay(){
-    const c = actx(); stopRun(); resetPaint(); $('#result').hidden = true;
+    const c = actx(); if(!c){ toast('Sound is not available on this device'); return; } stopRun(); resetPaint(); $('#result').hidden = true;
     const spb = 60 / S().tempo, num = beatsPerBar(cur), count = num === 2 ? 4 : num;
     const lead = 0.6, acBeat0 = c.currentTime + lead + count * spb;
     const off = now() - c.currentTime, lat = latencySec();
@@ -678,7 +632,7 @@
 
   // "Hear me": her recorded notes over the same beat
   function replay(r){
-    const c = actx(); try{ Sound.cancel('replay'); }catch(e){}
+    const c = actx(); if(!c) return; try{ Sound.cancel('replay'); }catch(e){}
     const minT = Math.min(0, ...r.events.map(e => e.t));
     const base = c.currentTime + 0.5 - minT;
     for(let k = 0; k < songBeats(cur); k++) click(base + k * r.spb, k % beatsPerBar(cur) === 0);
@@ -917,8 +871,33 @@
   window.addEventListener('resize', () => { if(!$('#song').hidden && cur && !run) drawStaff(); });
   document.addEventListener('visibilitychange', () => { if(document.hidden){ stopRun(); micStop(); } });
 
+  /* ── Diagnostics: errors always kept in a small ring buffer (no audio, no
+     photos, no child data); the overlay shows only with ?debug=1 ── */
+  const DEBUG = /[?&]debug=1(&|$)/.test(location.search);
+  const errors = [];
+  function noteError(kind, msg){
+    errors.push({ at: new Date().toISOString().slice(11, 19), kind, msg: String(msg).slice(0, 200) });
+    if(errors.length > 30) errors.shift();
+  }
+  window.addEventListener('error', (e) => noteError('error', (e.message || 'error') + (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : '')));
+  window.addEventListener('unhandledrejection', (e) => noteError('promise', (e.reason && e.reason.message) || e.reason));
+  function diag(){
+    const vis = SCREENS.find(s => !$('#' + s).hidden) || '?';
+    return { env: MC.env ? (MC.env() || 'prod') : '?', screen: vis, run: run ? run.mode + (run.alive ? ' (live)' : '') : '—',
+      timers: run && run.timers ? run.timers.length : 0, audio: ac ? ac.state : 'none', input: S().input,
+      midi: midiStatus.state + (midiStatus.names.length ? ' ' + midiStatus.names.join(',') : ''), mic: mic ? (mic.iv ? 'open' : 'starting') : 'off',
+      muted: muteUntil === Infinity ? 'speaking' : muteUntil > now() ? 'yes' : 'no', today: today ? `step ${today.i + 1}/${today.steps.length}` : '—',
+      rules: window.GardenRules.version, errors: errors.length };
+  }
+  if(DEBUG){
+    const box = document.createElement('pre');
+    box.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:99;max-width:min(92vw,420px);max-height:45vh;overflow:auto;margin:0;padding:8px 10px;border-radius:10px;background:rgba(20,16,32,.88);color:#e8ffe8;font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre-wrap;pointer-events:none';
+    document.body.appendChild(box);
+    setInterval(() => { const d = diag(); box.textContent = Object.entries(d).map(([k, v]) => k.padEnd(7) + v).join('\n') + (errors.length ? '\n— last errors —\n' + errors.slice(-5).map(e => `${e.at} ${e.kind}: ${e.msg}`).join('\n') : ''); }, 500);
+  }
+
   show('home');
   if('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   window.Garden = { SONGS, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors, staffSvg, WIN, POINTS,
-    _state: () => state, _press: (m, src) => pressed(m, src || 'screen'), _run: () => run };
+    _state: () => state, _press: (m, src) => pressed(m, src || 'screen'), _run: () => run, _diag: diag, _errors: () => errors.slice() };
 })();
