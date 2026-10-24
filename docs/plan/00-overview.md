@@ -374,5 +374,5 @@ Moved earlier:
 
 | PR | State |
 |---|---|
-| PR0 | in progress — governance, env isolation (S0), harness, G9/G10 fixed |
+| PR0 | done 2026-10-24 — pitch-trainer 5cc2b2c, music-garden 1007918, beat-hive acaef7c. Deferred by plan: IDB + garden_v1 env scoping (PR3, needs copy-migration). Noted: beat-hive SONG-bank MIDI remap for >16 pitches (P2, pre-existing). |
 | PR1–PR8 | not started |
