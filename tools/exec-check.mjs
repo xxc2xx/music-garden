@@ -15,10 +15,7 @@ import { fileURLToPath } from 'url';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPTS = (fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').match(/<script src="([\w.-]+\.js)"><\/script>/g) || [])
   .map(t => t.match(/src="([^"]+)"/)[1]);
-const XFAIL = {
-  'G1: quiz auto-advance after Home': 'PR1',
-  'G2: Learn finish after Home': 'PR1',
-};
+const XFAIL = {};                      // audit id → PR that fixes it
 
 // ── fake DOM ─────────────────────────────────────────────────────────────
 class ClassList { constructor(){ this.s = new Set(); } add(...c){ c.forEach(x => this.s.add(x)); } remove(...c){ c.forEach(x => this.s.delete(x)); }
@@ -77,6 +74,22 @@ function makeEnv(opts){
     getSelection: () => ({ removeAllRanges(){}, addRange(){} }),
     addEventListener(){}, removeEventListener(){},
   };
+  // optional fake Web Audio + microphone (counts opens/closes; no real sound)
+  const mic = { opens: 0, live: 0, denied: !!opts.micDenied };
+  if(opts.audio){
+    const param = () => ({ value: 0, setValueAtTime(){}, exponentialRampToValueAtTime(){}, linearRampToValueAtTime(){}, setTargetAtTime(){}, cancelScheduledValues(){} });
+    const node = () => ({ connect(){}, disconnect(){}, start(){}, stop(){}, setPeriodicWave(){}, gain: param(), frequency: param(), detune: param(), Q: param(), pan: param(),
+      threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), delayTime: param(), offset: param(),
+      fftSize: 2048, smoothingTimeConstant: 0, getFloatTimeDomainData(b){ b.fill(0); }, buffer: null, type: '', curve: null, onended: null });
+    win.AudioContext = class { constructor(){ this.state = 'running'; this.sampleRate = 48000; this.destination = node(); this.outputLatency = 0; this.baseLatency = 0; }
+      get currentTime(){ return clock / 1000; } resume(){ return Promise.resolve(); } close(){ return Promise.resolve(); }
+      createGain(){ return node(); } createOscillator(){ return node(); } createBufferSource(){ return node(); } createAnalyser(){ return node(); }
+      createMediaStreamSource(){ return node(); } createBuffer(){ return { getChannelData: () => new Float32Array(16) }; }
+      createBiquadFilter(){ return node(); } createDynamicsCompressor(){ return node(); } createWaveShaper(){ return node(); } createStereoPanner(){ return node(); }
+      createDelay(){ return node(); } createConstantSource(){ return node(); } createPeriodicWave(){ return {}; } createMediaStreamDestination(){ return Object.assign(node(), { stream: {} }); } };
+    win.navigator.mediaDevices = { getUserMedia: () => mic.denied ? Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }))
+      : (mic.opens++, mic.live++, Promise.resolve({ getTracks: () => [{ stop(){ mic.live--; } }] })) };
+  }
   win.window = win; win.self = win;
   const ctx = vm.createContext(win);
   const advance = (ms) => {
@@ -90,7 +103,7 @@ function makeEnv(opts){
     }
     clock = end;
   };
-  return { win, ctx, doc, reg, created, spoken, store, advance, homes,
+  return { win, ctx, doc, reg, created, spoken, store, advance, homes, mic,
     $: (id) => doc.getElementById(id), boot(){ for(const f of SCRIPTS) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f }); } };
 }
 
@@ -164,6 +177,56 @@ test('no uncaught errors recorded during these flows', {}, (env) => {
   env.$('tQuiz').click(); answerQuiz(env); env.advance(2000);
   env.$('tPiano').click(); env.win.Garden._press(64);
   return env.win.Garden._errors().length === 0 || JSON.stringify(env.win.Garden._errors());
+});
+
+const micMode = { audio: true, seed: { garden_v1: JSON.stringify({ settings: { input: 'mic' } }) } };
+const flush = () => new Promise(r => setImmediate(r));   // let getUserMedia promises settle
+async function atest(name, opts, fn){
+  const env = makeEnv(opts);
+  try{ env.boot(); }catch(e){ return result(name, false, 'boot threw: ' + e.message); }
+  try{ const r = await fn(env); result(name, r === true, typeof r === 'string' ? r : ''); }catch(e){ result(name, false, 'threw: ' + e.message); }
+}
+const openSong = (env) => { env.$('tBook').click(); env.created.find(e => e.classList.contains('song')).click(); };
+
+await atest('G3: opening a song does not open the mic', micMode, async (env) => {
+  openSong(env); await flush();
+  return env.mic.opens === 0 || `mic opened ${env.mic.opens}× just by opening the song`;
+});
+await atest('G3: Learn opens the mic and finishing releases it', micMode, async (env) => {
+  openSong(env); env.$('mLearn').click(); await flush();
+  if(env.mic.live !== 1) return `mic not open during Learn (live=${env.mic.live})`;
+  [60, 62, 60].forEach(m => env.win.Garden._press(m)); env.advance(600); await flush();
+  return env.mic.live === 0 || `mic still open after Learn finished (live=${env.mic.live})`;
+});
+await atest('G3: leaving mid-Play releases the mic', micMode, async (env) => {
+  openSong(env); env.$('mPlay').click(); await flush();
+  if(env.mic.live !== 1) return 'mic not open during Play!';
+  env.advance(1500); env.homes[0].click(); await flush();
+  return env.mic.live === 0 || 'mic left open after Home';
+});
+await atest('G3: Home while the mic permission is still pending → closed when it arrives', micMode, async (env) => {
+  openSong(env); env.$('mLearn').click();       // getUserMedia not settled yet
+  env.homes[0].click(); await flush();
+  return env.mic.live === 0 || 'a late permission left the mic open';
+});
+await atest('mic denied → Learn still works with the screen keys', Object.assign({ micDenied: true }, micMode), async (env) => {
+  openSong(env); env.$('mLearn').click(); await flush();
+  [60, 62, 60].forEach(m => env.win.Garden._press(m)); env.advance(600);
+  return !!env.win.Garden._state().songs.drd || 'Learn did not finish';
+});
+await atest('Again during the Learn finish delay records once', { audio: true }, async (env) => {
+  openSong(env); env.$('mLearn').click();
+  [60, 62, 60].forEach(m => env.win.Garden._press(m));
+  env.$('mLearn').click();                      // she taps Learn again inside the 450 ms
+  env.advance(1000);
+  const a = (env.win.Garden._state().songs.drd || { attempts: [] }).attempts.length;
+  return a === 0 || `recorded ${a} Learn result(s) from a run she restarted`;
+});
+await atest('Today: Home during the last quiz answer stays home', { audio: true }, async (env) => {
+  env.$('play').click();
+  for(let q = 0; q < 3; q++){ answerQuiz(env); env.advance(1800); }
+  answerQuiz(env); env.homes[0].click(); env.advance(3000);
+  return (env.$('home').hidden === false && env.$('song').hidden !== false && env.$('done').hidden !== false) || 'Today moved on after Home';
 });
 
 console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');

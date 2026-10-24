@@ -375,4 +375,5 @@ Moved earlier:
 | PR | State |
 |---|---|
 | PR0 | done 2026-10-24 — pitch-trainer 5cc2b2c, music-garden 1007918, beat-hive acaef7c. Deferred by plan: IDB + garden_v1 env scoping (PR3, needs copy-migration). Noted: beat-hive SONG-bank MIDI remap for >16 pitches (P2, pre-existing). |
-| PR1–PR8 | not started |
+| PR1 | done — Life per screen visit; G1–G4 fixed with regression tests (fail on the old code); mic open only during Learn/Play runs |
+| PR2–PR8 | not started |
