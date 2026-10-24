@@ -328,9 +328,22 @@
   }
 
   /* ── Screens ── */
+  // One Life per screen visit. Anything scheduled for a screen goes through
+  // life.timeout, and show() ends the old Life first — so a callback can
+  // never act on a screen she has already left (audit G1/G2).
+  function makeLife(){
+    const ids = new Set(); let alive = true;
+    return {
+      get alive(){ return alive; },
+      timeout(fn, ms){ if(!alive) return 0; const id = setTimeout(() => { ids.delete(id); if(alive) fn(); }, ms); ids.add(id); return id; },
+      end(){ alive = false; ids.forEach(clearTimeout); ids.clear(); },
+    };
+  }
+  let life = makeLife();
   const SCREENS = ['home', 'book', 'song', 'quiz', 'done', 'free', 'grown'];
   function show(id){
-    if(id !== 'song') { stopRun(); micStop(); }
+    life.end(); life = makeLife();
+    stopRun(); micStop();
     SCREENS.forEach(s => $('#' + s).hidden = s !== id);
     if(id === 'home') { $('#berryCount').textContent = state.berries; today = null; }
     if(id !== 'song' && id !== 'free') piano = null;
@@ -369,7 +382,6 @@
     ['mListen', 'mLearn', 'mPlay'].forEach(id => $('#' + id).hidden = !!only && id !== only);
     drawDots();
     updateChip();
-    if(S().input === 'mic') micStart();
     if(S().input === 'midi' && !Midi.connected) Midi.connect();
   }
   function drawSongBerries(){ $('#songBerries').innerHTML = berryIcons((state.songs[cur.id] || {}).best || 0, 30); }
@@ -417,6 +429,7 @@
     (run.timers || []).forEach(clearTimeout);
     try{ Sound.cancel('guide'); Sound.cancel('listen'); Sound.cancel('replay'); }catch(e){}
     sink = null; clickTimes = [];
+    micStop();
     $('#countin').hidden = true; $('#combo').hidden = true;
     hintKey(null);
     if(view && view.head) view.head.setAttribute('opacity', '0');
@@ -457,7 +470,8 @@
   $('#mLearn').addEventListener('click', () => {
     actx(); stopRun(); resetPaint(); $('#result').hidden = true;
     const tg = targetsOf(cur);
-    const r = run = { mode: 'learn', alive: true, k: 0, tries: tg.map(() => 0), events: [], t0: now() };
+    const r = run = { mode: 'learn', alive: true, timers: [], k: 0, tries: tg.map(() => 0), events: [], t0: now() };
+    micStart();
     const step = () => {
       const t = tg[r.k]; setNow(t.i);
       if(S().hints) hintKey(t.m);
@@ -470,7 +484,7 @@
       if(MC.pc(m) === MC.pc(want.m)){
         paintHead(want.i, want.m, true); popOn(want.i, 'yes');
         r.k++;
-        if(r.k >= tg.length){ sink = null; hintKey(null); setNow(null); setTimeout(() => finishLearn(r, tg), 450); return; }
+        if(r.k >= tg.length){ sink = null; hintKey(null); setNow(null); r.timers.push(life.timeout(() => { if(r.alive) finishLearn(r, tg); }, 450)); return; }
         step();
       } else {
         r.tries[r.k]++; wobble(want.i);
@@ -482,6 +496,7 @@
     step();
   });
   function finishLearn(r, tg){
+    r.alive = false; run = null; micStop();              // the run is over: release the mic
     const first = r.tries.filter(x => x === 0).length, pct = Math.round(first / tg.length * 100), berries = berriesFor(pct);
     record({ mode: 'learn', score: pct, berries, tally: { first, n: tg.length } });
     if(S().input !== 'mic') chime();
@@ -499,6 +514,7 @@
     const off = now() - c.currentTime, lat = latencySec();
     const tg = targetsOf(cur), total = songBeats(cur);
     const win = Math.min(0.5, 0.45 / spb);
+    micStart();
     const r = run = { mode: 'play', alive: true, timers: [], spb, beat0: acBeat0 + off + lat, tg, judged: tg.map(() => null),
       wrong: tg.map(() => false), events: [], combo: 0, maxCombo: 0, shownCount: null };
     clickTimes = [];
@@ -544,7 +560,7 @@
     animate(r, () => total);
   }
   function finishPlay(r){
-    sink = null; clickTimes = []; $('#combo').hidden = true; setNow(null);
+    sink = null; clickTimes = []; $('#combo').hidden = true; setNow(null); micStop();
     const pct = scoreOf(r.judged), berries = berriesFor(pct), tim = timingSummary(r.judged);
     const tally = { great: 0, good: 0, ok: 0, wrong: 0, miss: 0 };
     r.judged.forEach(j => tally[j ? j.v : 'miss']++);
@@ -673,12 +689,12 @@
     const answer = (picked, el, all) => {
       if(done || el.classList.contains('faded')) return;
       if(MC.pc(picked) === MC.pc(m)){
-        done = true; el.classList.add('right'); chime(); setTimeout(() => playTone(m, 0.7), 350);
+        done = true; el.classList.add('right'); chime(); life.timeout(() => playTone(m, 0.7), 350);
         const st = state.quiz[m] = state.quiz[m] || { r: 0, n: 0 }; st.n++; if(firstTry) st.r++;
         if(firstTry){ quiz.berries++; addBerries(1); if(today) today.berries++; }
         fb.innerHTML = `Yes! That's <span style="color:${textCol(m)}">&nbsp;${nameOf(m)}</span>`;
         say(`Yes! ${sayOf(m)}!`);
-        setTimeout(() => { quiz.k++; quiz.k >= quiz.n ? quizDone() : quizStep(); }, 1700);
+        life.timeout(() => { quiz.k++; quiz.k >= quiz.n ? quizDone() : quizStep(); }, 1700);
       } else {
         if(firstTry){ const st = state.quiz[m] = state.quiz[m] || { r: 0, n: 0 }; st.n++; save(); }
         firstTry = false; el.classList.add('faded'); boop();
@@ -868,7 +884,7 @@
     });
   })();
 
-  window.addEventListener('resize', () => { if(!$('#song').hidden && cur && !run) drawStaff(); });
+  window.addEventListener('resize', () => { if(!$('#song').hidden && cur && !(run && run.alive)) drawStaff(); });
   document.addEventListener('visibilitychange', () => { if(document.hidden){ stopRun(); micStop(); } });
 
   /* ── Diagnostics: errors always kept in a small ring buffer (no audio, no
