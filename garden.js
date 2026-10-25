@@ -558,10 +558,13 @@
     $('#songMsg').textContent = 'Get ready…';
     const judge = (k, v, dt, m) => {
       r.judged[k] = { v, dt, m };
-      const t = tg[k], mic = r.lastSrc === 'mic';
-      r.ses.attempt({ skill: 'rhythm', target: { m: t.m, beat: t.beat }, observed: m != null ? { m } : null,
-        outcome: v === 'wrong' ? 'wrong' : v === 'miss' ? 'miss' : 'correct', firstTry: !r.wrong[k],
-        errMs: dt, timing: dt == null ? null : mic ? 'mic-est' : 'clock', evidence: m == null ? 'none' : evOf(r.lastSrc), extra: { verdict: v } });
+      // a wrong key first is kept as the observation when nothing right followed;
+      // when she corrected herself, the first wrong key goes in extra.firstPress
+      const t = tg[k], w = r.wrong[k], src = m != null ? r.lastSrc : w ? w.src : null, obs = m != null ? m : w ? w.m : null;
+      r.ses.attempt({ skill: 'rhythm', target: { m: t.m, beat: t.beat }, observed: obs != null ? { m: obs } : null,
+        outcome: v === 'wrong' ? 'wrong' : v === 'miss' ? 'miss' : 'correct', firstTry: !w,
+        errMs: dt, timing: dt == null ? null : src === 'mic' ? 'mic-est' : 'clock', evidence: obs == null ? 'none' : evOf(src),
+        extra: Object.assign({ verdict: v }, w && m != null ? { firstPress: { m: w.m, src: w.src } } : {}) });
       const label = v === 'ok' ? (dt < 0 ? 'early' : 'late') : v;
       popOn(t.i, label); paintHead(t.i, t.m, v !== 'wrong' && v !== 'miss');
       if(v === 'great' || v === 'good'){ r.combo++; r.maxCombo = Math.max(r.maxCombo, r.combo); } else r.combo = 0;
@@ -576,8 +579,8 @@
       tg.forEach((x, k) => { if(!r.judged[k]){ const d = Math.abs(bp - x.beat); if(d <= win && d < bd){ bd = d; best = k; } } });
       if(best < 0) return;                               // between notes: not counted
       const x = tg[best];
-      if(MC.pc(m) === MC.pc(x.m)) judge(best, verdictOf((bp - x.beat) * spb * 1000, r.wrong[best]), Math.round((bp - x.beat) * spb * 1000), m);
-      else if(!r.wrong[best]){ r.wrong[best] = true; wobble(x.i); }
+      if(MC.pc(m) === MC.pc(x.m)) judge(best, verdictOf((bp - x.beat) * spb * 1000, !!r.wrong[best]), Math.round((bp - x.beat) * spb * 1000), m);
+      else if(!r.wrong[best]){ r.wrong[best] = { m, src }; wobble(x.i); }
     };
     r.tick = (b) => {
       if(b < 0){
@@ -982,7 +985,7 @@
   (() => {
     const b = $('#gReset'); let armed = 0;
     b.addEventListener('click', () => {
-      if(Date.now() - armed < 3000){ const keep = state.settings; state = load(); state.songs = {}; state.quiz = {}; state.days = []; state.berries = 0; state.settings = keep; save(); b.textContent = 'Reset all progress…'; drawGrown(); toast('Progress cleared'); armed = 0; return; }
+      if(Date.now() - armed < 3000){ const keep = state.settings; state = load(); state.songs = {}; state.quiz = {}; state.days = []; state.berries = 0; delete state.today; state.settings = keep; save(); b.textContent = 'Reset all progress…'; drawGrown(); toast('Progress cleared'); armed = 0; return; }
       armed = Date.now(); b.textContent = 'Tap again to clear everything';
       setTimeout(() => { if(Date.now() - armed >= 2900) b.textContent = 'Reset all progress…'; }, 3100);
     });

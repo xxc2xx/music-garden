@@ -253,5 +253,25 @@ await atest('G5: a snapshot naming an unknown song starts fresh, no throw', { au
   return env.$('quiz').hidden === false || 'resumed with a song that does not exist';
 });
 
+// practice-log evidence (Codex P2): the store is swapped for the in-memory
+// adapter after boot, so the attempts Garden writes can be read back
+const memLearn = (env) => { const MC = env.win.MusicCore, A = MC.memAdapter(MC.LEARN_STORES), L = MC.createLearn(A); MC.learn = () => L; return A; };
+await atest('Play!: a wrong key with nothing right after is logged as the wrong note', { audio: true }, async (env) => {
+  const A = memLearn(env);
+  openSong(env); env.$('mPlay').click(); await flush();
+  const r = env.win.Garden._run(), spb = 60 / env.win.Garden._state().settings.tempo;
+  const due = (r.beat0 + r.tg[0].beat * spb) * 1000;
+  env.advance(Math.max(0, due - 40 - env.win.performance.now()));
+  env.win.Garden._press(r.tg[0].m === 62 ? 64 : 62);           // a wrong key on the first note, never corrected
+  env.advance(30000); await flush();
+  const first = [...A.data.attempts.values()].sort((a, b) => a.t - b.t)[0];
+  return (first && first.outcome === 'wrong' && first.observed && first.observed.m !== r.tg[0].m && first.evidence === 'clock')
+    || 'first attempt: ' + JSON.stringify(first && { outcome: first.outcome, observed: first.observed, evidence: first.evidence });
+});
+test('Reset all progress also forgets an unfinished Today', { seed: { garden_v1: JSON.stringify({ today: { day: todayKey, song: 'drm', i: 1, berries: 1, done: false }, berries: 4 }) } }, (env) => {
+  env.$('gReset').click(); env.$('gReset').click();
+  return env.win.Garden._state().today === undefined || 'Today snapshot survived the reset';
+});
+
 console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');
 process.exit(fail ? 1 : 0);
