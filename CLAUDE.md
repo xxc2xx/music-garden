@@ -18,8 +18,12 @@ a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
   thresholds as versioned data (initial heuristics, bump `version` on any
   change), `garden.js` = the app.
 - Same origin as Pitch Trainer and Beat Hive (`xxc2xx.github.io`), so
-  `localStorage` is shared: Garden uses `garden_v1`; it reads Pitch Trainer's
-  speaker calibration `musicEco_latencyMs`. `sw.js` only deletes caches
+  storage is shared. Every name goes through `MusicCore.ns` (staging =
+  `garden_v1@stg`, `musicEco_latencyMs@stg`, IDB `music-learn@stg`); never
+  write an un-scoped name. Practice log = `MusicCore.learn()` (sessions
+  `g-song` / `g-quiz` / `g-today`, attempts with evidence); Today's step is
+  snapshotted in `garden_v1.today` so a refresh resumes. Grown-ups → Saved
+  progress = storage health + backup file export / merge-only restore. `sw.js` only deletes caches
   starting with its own prefix (`mg-`).
 
 ## What it does
@@ -27,7 +31,7 @@ a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
 The clean kid-facing app (the main `index.html` stays the full tool). One big
 choice per screen, spoken prompts, grown-up settings behind a 1.5 s
 press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
-`garden.html`; strawberries are the reward. State: `localStorage.garden_v1`.
+`garden.html`; strawberries are the reward. State: `garden_v1` (env-scoped) + the practice log.
 
 - **My book**: her Yamaha JMC tunes (do-re-do … five-finger hill, plus the
   bass-clef version) in `SONGS` as `[midi, beats]`, drawn by `staffSvg`

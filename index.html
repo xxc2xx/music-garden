@@ -400,6 +400,14 @@ svg.staff .wob{animation:wob .4s}
           <button class="copy" type="button" id="gCopy">Copy summary</button>
           <button class="back" type="button" id="gReset" style="align-self:flex-start">Reset all progress…</button>
         </div>
+        <div class="gcard">
+          <h3>Saved progress</h3>
+          <p class="status" id="gHealth"></p>
+          <button class="copy" type="button" id="gExport">Save a backup file</button>
+          <label class="back" for="gImport" style="align-self:flex-start;cursor:pointer">Restore from a backup…</label>
+          <input type="file" id="gImport" accept="application/json,.json" hidden>
+          <p class="status">A backup holds her songs, quiz and practice log (no recordings). Restoring adds to what is here; it never deletes.</p>
+        </div>
       </div>
     </div>
   </section>

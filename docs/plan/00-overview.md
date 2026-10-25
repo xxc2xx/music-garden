@@ -377,4 +377,5 @@ Moved earlier:
 | PR0 | done 2026-10-24 — pitch-trainer 5cc2b2c, music-garden 1007918, beat-hive acaef7c. Deferred by plan: IDB + garden_v1 env scoping (PR3, needs copy-migration). Noted: beat-hive SONG-bank MIDI remap for >16 pitches (P2, pre-existing). |
 | PR1 | done — Life per screen visit; G1–G4 fixed with regression tests (fail on the old code); mic open only during Learn/Play runs |
 | PR2 | done — pitch-trainer: unique ids, 31 faint colours ≥4.5:1, Beat logging after resume, recording-ready buttons; notes.js 1.0.1 iOS audio warm-up |
-| PR3–PR8 | not started |
+| PR3 | done 2026-10-25 — music-core 1.2.0 `MusicCore.learn()` (env-scoped `music-learn<ns>`, sessions/attempts/items/meta, recover, export/import, health); copy-only staging migration; Garden logs g-song/g-quiz/g-today with picked notes (G6, G7); Today snapshot resumes after refresh (G5); Pitch Trainer Progress reads Garden; Grown-ups Saved progress card. Verified in Chrome with real IndexedDB: migration, recovery after reload, backup restore ×2 (no duplicates), rollback drill (old build still sees legacy data). Chrome found one bug the in-memory tests could not: open-ended key ranges threw (fixed + regression test). Not done here (plan → later PRs): `rebuild()`, Skill/Song derived items, DailyPlan store (PR4/PR6). |
+| PR4–PR8 | not started |

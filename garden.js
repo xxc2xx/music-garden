@@ -27,14 +27,18 @@
   const WIN = window.GardenCore.WIN, POINTS = window.GardenCore.POINTS;
 
   /* ── State ── */
-  const KEY = 'garden_v1';
+  const KEY = MC.adoptKey('garden_v1');                 // env-scoped: live / staging / dev / test never share
+  const LAT_KEY = MC.adoptKey('musicEco_latencyMs');
   const DEFAULTS = { input: 'screen', names: 'solf', labels: true, hints: true, voice: true, bass: false,
     tempo: 76, click: true, guide: false, appSound: false };
   let state = load();
   function load(){
     let s = null;
     try{ s = JSON.parse(localStorage.getItem(KEY)); }catch(e){}
-    // anything of the wrong shape falls back to its default (G9)
+    return normalize(s);
+  }
+  // anything of the wrong shape falls back to its default (G9) — also used for imported backups
+  function normalize(s){
     const obj = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
     s = obj(s);
     const st = Object.assign({}, DEFAULTS);
@@ -51,7 +55,7 @@
   function addBerries(n){ state.berries += n; markDay(); save(); $('#berryCount').textContent = state.berries; }
   function latencySec(){
     let ms = null;
-    try{ const v = localStorage.getItem('musicEco_latencyMs'); if(v != null && v !== '') ms = +v; }catch(e){}
+    try{ const v = localStorage.getItem(LAT_KEY); if(v != null && v !== '') ms = +v; }catch(e){}
     if(ms != null && isFinite(ms)) return ms / 1000;
     return ac ? (ac.outputLatency || 0) + (ac.baseLatency || 0) : 0;
   }
@@ -327,6 +331,26 @@
       : 'Tap the keys';
   }
 
+  /* ── Practice log (MusicCore.learn, plan D2) ──
+     Every activity is a session; every answer / note is an attempt with its
+     evidence (clock = screen keys or MIDI; mic-verified = heard pitch).
+     Storage trouble never stops play — it shows up in Grown-ups. */
+  const NO_SESSION = { attempt(){}, end(){ return Promise.resolve(); }, pause(){}, resume(){}, ended: true };
+  const openSessions = new Set();
+  const learnStore = () => (MC.learn ? MC.learn() : null);
+  function track(kind, f){
+    const L = learnStore(); if(!L) return NO_SESSION;
+    const h = L.begin(Object.assign({ app: 'garden', kind, input: S().input, rules: window.GardenRules.version }, f || {}));
+    openSessions.add(h); return h;
+  }
+  function close(h, status, summary){ if(!h || h.ended) return; openSessions.delete(h); h.end(status, summary); }
+  const evOf = (src) => src === 'mic' ? 'mic-verified' : 'clock';
+  let bootInfo = null;
+  if(MC.ready){
+    MC.onStorageError((m) => noteError('storage', m));
+    MC.ready().then((o) => { bootInfo = o; });
+  }
+
   /* ── Screens ── */
   // One Life per screen visit. Anything scheduled for a screen goes through
   // life.timeout, and show() ends the old Life first — so a callback can
@@ -344,8 +368,9 @@
   function show(id){
     life.end(); life = makeLife();
     stopRun(); micStop();
+    openSessions.forEach(h => close(h, 'exited'));
     SCREENS.forEach(s => $('#' + s).hidden = s !== id);
-    if(id === 'home') { $('#berryCount').textContent = state.berries; today = null; }
+    if(id === 'home') { $('#berryCount').textContent = state.berries; if(today){ close(today.ses, 'exited'); today = null; } }
     if(id !== 'song' && id !== 'free') piano = null;
   }
   document.querySelectorAll('.home').forEach(b => b.addEventListener('click', () => { try{ speechSynthesis.cancel(); }catch(e){} show('home'); }));
@@ -424,6 +449,7 @@
 
   function stopRun(){
     if(!run) return;
+    if(run.alive && run.ses) close(run.ses, 'exited');
     run.alive = false;
     cancelAnimationFrame(run.raf);
     (run.timers || []).forEach(clearTimeout);
@@ -470,18 +496,21 @@
   $('#mLearn').addEventListener('click', () => {
     actx(); stopRun(); resetPaint(); $('#result').hidden = true;
     const tg = targetsOf(cur);
-    const r = run = { mode: 'learn', alive: true, timers: [], k: 0, tries: tg.map(() => 0), events: [], t0: now() };
+    const r = run = { mode: 'learn', alive: true, timers: [], k: 0, tries: tg.map(() => 0), events: [], t0: now(),
+      ses: track('g-song', { contentId: cur.id, extra: { mode: 'learn', title: cur.title } }) };
     micStart();
     const step = () => {
       const t = tg[r.k]; setNow(t.i);
       if(S().hints) hintKey(t.m);
       $('#songMsg').textContent = r.k === 0 ? `Start on ${nameOf(t.m)}` : '';
     };
-    sink = (m, t) => {
+    sink = (m, t, src) => {
       if(!r.alive) return;
       r.events.push({ m, t: t - r.t0 });
-      const want = tg[r.k];
-      if(MC.pc(m) === MC.pc(want.m)){
+      const want = tg[r.k], right = MC.pc(m) === MC.pc(want.m);
+      r.ses.attempt({ skill: 'motor', target: { m: want.m, i: want.i }, observed: { m }, outcome: right ? 'correct' : 'wrong',
+        firstTry: r.tries[r.k] === 0, evidence: evOf(src) });
+      if(right){
         paintHead(want.i, want.m, true); popOn(want.i, 'yes');
         r.k++;
         if(r.k >= tg.length){ sink = null; hintKey(null); setNow(null); r.timers.push(life.timeout(() => { if(r.alive) finishLearn(r, tg); }, 450)); return; }
@@ -498,6 +527,7 @@
   function finishLearn(r, tg){
     r.alive = false; run = null; micStop();              // the run is over: release the mic
     const first = r.tries.filter(x => x === 0).length, pct = Math.round(first / tg.length * 100), berries = berriesFor(pct);
+    close(r.ses, 'completed', { score: pct, first, n: tg.length });
     record({ mode: 'learn', score: pct, berries, tally: { first, n: tg.length } });
     if(S().input !== 'mic') chime();
     say(berries >= 2 ? 'You played it all! Now try it with the beat.' : 'You did it! Let\'s practise once more.');
@@ -516,7 +546,8 @@
     const win = Math.min(0.5, 0.45 / spb);
     micStart();
     const r = run = { mode: 'play', alive: true, timers: [], spb, beat0: acBeat0 + off + lat, tg, judged: tg.map(() => null),
-      wrong: tg.map(() => false), events: [], combo: 0, maxCombo: 0, shownCount: null };
+      wrong: tg.map(() => false), events: [], combo: 0, maxCombo: 0, shownCount: null, lastSrc: 'screen',
+      ses: track('g-song', { contentId: cur.id, extra: { mode: 'play', title: cur.title, bpm: S().tempo } }) };
     clickTimes = [];
     for(let k = -count; k < total; k++){
       const t = acBeat0 + k * spb;
@@ -527,14 +558,18 @@
     $('#songMsg').textContent = 'Get ready…';
     const judge = (k, v, dt, m) => {
       r.judged[k] = { v, dt, m };
-      const t = tg[k];
+      const t = tg[k], mic = r.lastSrc === 'mic';
+      r.ses.attempt({ skill: 'rhythm', target: { m: t.m, beat: t.beat }, observed: m != null ? { m } : null,
+        outcome: v === 'wrong' ? 'wrong' : v === 'miss' ? 'miss' : 'correct', firstTry: !r.wrong[k],
+        errMs: dt, timing: dt == null ? null : mic ? 'mic-est' : 'clock', evidence: m == null ? 'none' : evOf(r.lastSrc), extra: { verdict: v } });
       const label = v === 'ok' ? (dt < 0 ? 'early' : 'late') : v;
       popOn(t.i, label); paintHead(t.i, t.m, v !== 'wrong' && v !== 'miss');
       if(v === 'great' || v === 'good'){ r.combo++; r.maxCombo = Math.max(r.maxCombo, r.combo); } else r.combo = 0;
       const cb = $('#combo'); cb.hidden = r.combo < 3; cb.textContent = `Combo ${r.combo}!`;
     };
-    sink = (m, t) => {
+    sink = (m, t, src) => {
       if(!r.alive) return;
+      r.lastSrc = src;
       const bp = (t - r.beat0) / spb;
       r.events.push({ m, t: +(t - r.beat0).toFixed(3) });
       let best = -1, bd = 9;
@@ -564,6 +599,7 @@
     const pct = scoreOf(r.judged), berries = berriesFor(pct), tim = timingSummary(r.judged);
     const tally = { great: 0, good: 0, ok: 0, wrong: 0, miss: 0 };
     r.judged.forEach(j => tally[j ? j.v : 'miss']++);
+    close(r.ses, 'completed', { score: pct, tally, biasMs: tim.bias, sdMs: tim.sd, bpm: S().tempo, combo: r.maxCombo });
     const wrongNotes = r.judged.map((j, k) => j && j.v === 'wrong' ? r.tg[k].m : null).filter(x => x != null);
     record({ mode: 'play', score: pct, berries, tally, bias: tim.bias, sd: tim.sd, combo: r.maxCombo, bpm: S().tempo, events: r.events,
       wrong: wrongNotes });
@@ -673,7 +709,8 @@
   function openQuiz(n){
     actx(); show('quiz');
     const kinds = ['name', 'name', 'find', 'song', 'name', 'find', 'name', 'song', 'name', 'name'];
-    quiz = { n: n || 8, k: 0, berries: 0, kinds: shuffle(kinds.slice(0, n || 8)), last: null };
+    quiz = { n: n || 8, k: 0, berries: 0, kinds: shuffle(kinds.slice(0, n || 8)), last: null,
+      ses: track('g-quiz', { extra: { n: n || 8, bass: S().bass }, planId: today ? today.planId : null }) };
     quizStep();
   }
   function quizDots(){ $('#quizDots').innerHTML = Array.from({ length: quiz.n }, (_, i) => `<i class="${i < quiz.k ? 'done' : i === quiz.k ? 'now' : ''}"></i>`).join(''); }
@@ -688,6 +725,9 @@
     let firstTry = true, done = false;
     const answer = (picked, el, all) => {
       if(done || el.classList.contains('faded')) return;
+      // what she picked is kept, so the parent page can say "mixes up Re and Mi" (G7)
+      quiz.ses.attempt({ skill: 'reading', target: { m, kind }, observed: { m: picked },
+        outcome: MC.pc(picked) === MC.pc(m) ? 'correct' : 'wrong', firstTry, evidence: 'clock' });
       if(MC.pc(picked) === MC.pc(m)){
         done = true; el.classList.add('right'); chime(); life.timeout(() => playTone(m, 0.7), 350);
         const st = state.quiz[m] = state.quiz[m] || { r: 0, n: 0 }; st.n++; if(firstTry) st.r++;
@@ -744,6 +784,7 @@
   $('#quizAgain').addEventListener('click', () => quiz && quiz.again && quiz.again());
   function quizDone(){
     save();
+    close(quiz.ses, 'completed', { right: quiz.berries, n: quiz.n });
     if(today){ todayNext(); return; }
     showDone(quiz.berries, `You read ${quiz.berries} of ${quiz.n} notes on the first try!`);
   }
@@ -753,11 +794,22 @@
   function currentSong(){
     return SONGS.find(sg => ((state.songs[sg.id] || {}).best || 0) < 2) || SONGS[SONGS.length - 1];
   }
+  // Today's plan is saved per day, so a refresh / closed app resumes at the
+  // same step instead of starting over (G5). Rewards per step: PR4.
   function startToday(){
     actx();
-    const song = currentSong();
-    today = { steps: [{ t: 'quiz' }, { t: 'learn', song }, { t: 'play', song }], i: -1, berries: 0 };
+    const day = MC.dayKey(new Date()), snap = state.today;
+    const resume = snap && snap.day === day && !snap.done && SONGS.some(x => x.id === snap.song) && snap.i >= 0;
+    const song = resume ? SONGS.find(x => x.id === snap.song) : currentSong();
+    today = { steps: [{ t: 'quiz' }, { t: 'learn', song }, { t: 'play', song }], i: resume ? snap.i - 1 : -1,
+      berries: resume ? snap.berries || 0 : 0, planId: 'p_' + day, day };
+    today.ses = track('g-today', { planId: today.planId, contentId: song.id, extra: { resumedAt: resume ? snap.i : null } });
+    openSessions.delete(today.ses);            // spans several screens; ended by todayNext / Home
     todayNext();
+  }
+  function saveToday(done){
+    state.today = { day: today.day, rules: window.GardenRules.version, song: today.steps[1].song.id, i: today.i, berries: today.berries, done: !!done };
+    save();
   }
   function drawDots(){
     const d = $('#songDots');
@@ -769,7 +821,9 @@
     if(!today) return;
     today.i++;
     const st = today.steps[today.i];
-    if(!st){ const b = today.berries; showDone(Math.min(3, b), `You picked ${b} strawberr${b === 1 ? 'y' : 'ies'} today. See you tomorrow!`); today = null; return; }
+    saveToday(!st);
+    today.ses.rec.stepIdx = today.i;
+    if(!st){ const b = today.berries; close(today.ses, 'completed', { berries: b, steps: today.steps.length }); showDone(Math.min(3, b), `You picked ${b} strawberr${b === 1 ? 'y' : 'ies'} today. See you tomorrow!`); today = null; return; }
     if(st.t === 'quiz') openQuiz(4);
     else if(st.t === 'learn') { openSong(st.song, { only: 'mLearn', msg: `Let's learn ${st.song.title}. Tap Learn!` }); say(`Let's learn ${st.song.title}.`); }
     else { openSong(st.song, { only: 'mPlay', msg: 'Now with the beat. Tap Play!' }); say('Now play it with the beat!'); }
@@ -830,7 +884,7 @@
     $('#gLabels').checked = st.labels; $('#gHints').checked = st.hints; $('#gVoice').checked = st.voice; $('#gBass').checked = st.bass;
     seg($('#gTempo'), [[60, 'Slow 60'], [76, 'Medium 76'], [92, 'Quick 92']], st.tempo, (v) => st.tempo = v);
     $('#gClick').checked = st.click; $('#gGuide').checked = st.guide;
-    let lat = ''; try{ lat = localStorage.getItem('musicEco_latencyMs') || ''; }catch(e){}
+    let lat = ''; try{ lat = localStorage.getItem(LAT_KEY) || ''; }catch(e){}
     $('#gLat').value = lat;
     // songs table
     let rows = '<tr><th>Song</th><th>Best</th><th>Last Play!</th><th>Timing</th><th>Tries</th></tr>';
@@ -848,6 +902,30 @@
     }).join('');
     $('#gSummary').textContent = summaryText();
     $('#gStatus').textContent = `${state.days.length} practice day${state.days.length === 1 ? '' : 's'} · ${state.berries} strawberries`;
+    drawHealth();
+  }
+  // storage-health line: is the practice log being saved, and what the
+  // one-time copy from the old staging stores did
+  function drawHealth(){
+    const L = learnStore(), el = $('#gHealth');
+    if(!L){ el.textContent = 'Practice log not available in this version.'; return; }
+    const h = L.health, mig = bootInfo && bootInfo.log;
+    const migText = !mig ? '' : mig.error ? ` Copying older progress failed (${mig.error}); it will try again next time.`
+      : mig.skipped ? '' : ` Copied ${mig.sessions} older session${mig.sessions === 1 ? '' : 's'} from the previous version.`;
+    el.textContent = (h.ok ? 'Saving on this device.' : `Not saving right now — ${h.lastError}. She can keep playing; save a backup when it is fixed.`)
+      + (h.dropped ? ` ${h.dropped} damaged record${h.dropped === 1 ? '' : 's'} skipped.` : '') + migText;
+    const base = el.textContent;
+    L.sessions().then(ss => { if(el.textContent === base) el.textContent = base + ` ${ss.length} activit${ss.length === 1 ? 'y' : 'ies'} logged.`; });
+  }
+  // merge a backup's Garden progress into ours: never loses anything on either side
+  function mergeGarden(b){
+    const n = normalize(b);
+    state.days = [...new Set(state.days.concat(n.days))].sort();
+    state.berries = Math.max(state.berries, n.berries);
+    const len = (x) => (x && Array.isArray(x.attempts) ? x.attempts.length : 0);
+    Object.entries(n.songs).forEach(([id, r]) => { if(len(r) > len(state.songs[id])) state.songs[id] = r; });
+    Object.entries(n.quiz).forEach(([m, q]) => { if(q && Number.isFinite(q.n) && (!state.quiz[m] || q.n > state.quiz[m].n)) state.quiz[m] = q; });
+    save();
   }
   function summaryText(){
     const week = state.days.filter(d => d >= MC.addDays(MC.dayKey(new Date()), -6)).length;
@@ -868,12 +946,38 @@
   const bindCheck = (id, key, after) => $(id).addEventListener('change', (e) => { S()[key] = e.target.checked; save(); if(after) after(); });
   bindCheck('#gAppSound', 'appSound'); bindCheck('#gLabels', 'labels'); bindCheck('#gHints', 'hints');
   bindCheck('#gVoice', 'voice'); bindCheck('#gBass', 'bass'); bindCheck('#gClick', 'click'); bindCheck('#gGuide', 'guide');
-  $('#gLat').addEventListener('change', (e) => { const v = e.target.value.trim(); try{ if(v === '') localStorage.removeItem('musicEco_latencyMs'); else localStorage.setItem('musicEco_latencyMs', String(Math.max(0, Math.min(400, +v || 0)))); }catch(err){} });
+  $('#gLat').addEventListener('change', (e) => { const v = e.target.value.trim(); try{ if(v === '') localStorage.removeItem(LAT_KEY); else localStorage.setItem(LAT_KEY, String(Math.max(0, Math.min(400, +v || 0)))); }catch(err){} });
   $('#gBack').addEventListener('click', () => show('home'));
   $('#gCopy').addEventListener('click', () => {
     const text = summaryText();
     const fallback = () => { const r = document.createRange(); r.selectNodeContents($('#gSummary')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Selected — tap Copy'); };
     try{ navigator.clipboard.writeText(text).then(() => toast('Copied'), fallback); }catch(e){ fallback(); }
+  });
+  // backup: Garden progress + the whole practice log, as one JSON file
+  $('#gExport').addEventListener('click', async () => {
+    const L = learnStore();
+    const learn = L ? await L.export() : null;
+    const day = MC.dayKey(new Date());
+    const blob = new Blob([JSON.stringify({ format: 'music-garden-backup', v: 1, env: MC.env() || 'prod', exportedAt: new Date().toISOString(),
+      rules: window.GardenRules.version, garden: state, learn })], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `music-garden-backup-${day}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(learn ? 'Backup saved' : 'Backup saved (songs and quiz only)');
+  });
+  $('#gImport').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = '';
+    if(!f) return;
+    try{
+      const j = JSON.parse(await f.text());
+      if(!j || j.format !== 'music-garden-backup') throw new Error('not a Music Garden backup');
+      mergeGarden(j.garden);
+      const L = learnStore();
+      const r = L && j.learn ? await L.import(j.learn) : null;
+      drawGrown();
+      toast(r ? `Restored — ${r.sessions} activities${r.skipped ? `, ${r.skipped} damaged skipped` : ''}` : 'Restored songs and quiz');
+    }catch(err){ noteError('import', err.message); toast('Could not restore: ' + err.message); }
   });
   (() => {
     const b = $('#gReset'); let armed = 0;
@@ -885,7 +989,10 @@
   })();
 
   window.addEventListener('resize', () => { if(!$('#song').hidden && cur && !(run && run.alive)) drawStaff(); });
-  document.addEventListener('visibilitychange', () => { if(document.hidden){ stopRun(); micStop(); } });
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden){ stopRun(); micStop(); openSessions.forEach(h => h.pause()); if(today && today.ses) today.ses.pause(); }
+    else { openSessions.forEach(h => h.resume()); if(today && today.ses) today.ses.resume(); }
+  });
 
   /* ── Diagnostics: errors always kept in a small ring buffer (no audio, no
      photos, no child data); the overlay shows only with ?debug=1 ── */

@@ -1,22 +1,26 @@
 {
   "source": "pitch-trainer",
-  "sourceCommit": "5cc2b2c",
-  "syncedAt": "2026-10-24T14:13:39.753Z",
+  "sourceCommit": "fc29744",
+  "syncedAt": "2026-10-25T01:18:06.754Z",
   "modules": {
     "music-core.js": {
-      "version": "1.1.0",
-      "sha256": "899405dd2a7c63784654317e73defdb0c30450a1d19f4ac85ba193080b8da5ea",
+      "version": "1.2.0",
+      "sha256": "68086e7ecd5f6e494c33c4f715390c30e61107b990b3d2230738ce2245e8fbfb",
       "uses": [
         "CLEF_SHIFT",
         "PALETTE",
         "SOLFEGE",
         "addDays",
+        "adoptKey",
         "colorOf",
         "dayKey",
         "env",
         "isBlack",
+        "learn",
         "midiToFreq",
+        "onStorageError",
         "pc",
+        "ready",
         "staffStep"
       ]
     },
@@ -29,8 +33,8 @@
       ]
     },
     "midi.js": {
-      "version": "1.0.0",
-      "sha256": "343e0117b085b25efa1b80e2be2156862496ac969a8403a71f2f12c72b800d98",
+      "version": "1.0.1",
+      "sha256": "bfc299b11790438ff8ca23e2871b266a9a293cc931ecee984da1d38d9915238d",
       "uses": [
         "autoConnect",
         "connect",

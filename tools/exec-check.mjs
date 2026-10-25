@@ -122,7 +122,10 @@ function test(name, opts, fn){
 // answer the current quiz question correctly (tries the newest answer buttons)
 function answerQuiz(env){
   const btns = env.created.filter(e => e.classList.contains('ans') || e.classList.contains('choice')).slice(-3);
-  for(const b of btns){ b.click(); if(/Yes/.test(env.$('quizFb').innerHTML)) return true; }
+  const fb = env.$('quizFb'), yes = () => /Yes/.test(fb.innerHTML);
+  fb.innerHTML = '';                            // the last question's "Yes!" must not count for this one
+  for(const b of btns){ b.click(); if(yes()) return true; }
+  for(const m of [60, 62, 64, 65, 67, 48, 50, 52, 53, 55]){ env.win.Garden._press(m); if(yes()) return true; }   // "find it on the piano"
   return false;
 }
 
@@ -227,6 +230,27 @@ await atest('Today: Home during the last quiz answer stays home', { audio: true 
   for(let q = 0; q < 3; q++){ answerQuiz(env); env.advance(1800); }
   answerQuiz(env); env.homes[0].click(); env.advance(3000);
   return (env.$('home').hidden === false && env.$('song').hidden !== false && env.$('done').hidden !== false) || 'Today moved on after Home';
+});
+
+// G5: Today survives a refresh — finish the quiz step, "reload" (new page on
+// the same storage), tap Play today → straight to Learn of the same song
+const onLearnStep = (env) => env.$('song').hidden === false && env.$('mLearn').hidden !== true && env.$('mPlay').hidden === true;
+const d = new Date(), todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+await atest('G5: reload after the Today quiz resumes at Learn', { audio: true }, async (env) => {
+  env.$('play').click();
+  for(let q = 0; q < 12 && env.$('quiz').hidden === false; q++){ answerQuiz(env); env.advance(2500); }   // a wrong first try repeats the question
+  if(!onLearnStep(env)) return 'did not reach the Learn step before reloading: ' + JSON.stringify({ quiz: env.$('quiz').hidden, song: env.$('song').hidden, learn: env.$('mLearn').hidden, play: env.$('mPlay').hidden, done: env.$('done').hidden, fb: env.$('quizFb').innerHTML, err: env.win.Garden._errors() });
+  const env2 = makeEnv({ audio: true, seed: Object.assign({}, env.store) });
+  env2.boot(); env2.$('play').click();
+  return onLearnStep(env2) || 'Today started over after a reload';
+});
+await atest('G5: yesterday\'s unfinished Today starts fresh', { audio: true, seed: { garden_v1: JSON.stringify({ today: { day: '2000-01-01', song: 'drm', i: 1, berries: 2, done: false } }) } }, async (env) => {
+  env.$('play').click();
+  return env.$('quiz').hidden === false || 'an old day\'s snapshot was resumed';
+});
+await atest('G5: a snapshot naming an unknown song starts fresh, no throw', { audio: true, seed: { garden_v1: JSON.stringify({ today: { day: todayKey, song: 'gone', i: 2, berries: 9 } }) } }, async (env) => {
+  env.$('play').click();
+  return env.$('quiz').hidden === false || 'resumed with a song that does not exist';
 });
 
 console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');
