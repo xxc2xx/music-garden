@@ -48,5 +48,43 @@ const t = G.timingSummary([{ v: 'great', dt: -80 }, { v: 'good', dt: -120 }, { v
 ok(t.bias === -100 && t.n === 2 && /early/.test(t.text), 'timing uses played notes only; early reads as early');
 ok(G.timingSummary([{ v: 'great', dt: 10 }]).text === '', 'one note is not enough for a timing tip');
 
+// Today's plan (D5): class order, capability-aware, stable, rewards once
+const ids = G.SONGS.map(s => s.id);
+const p = G.buildPlan('2026-10-25', 'hcb', { mic: true });
+ok(p.steps.map(s => s.type).join() === 'hear,sing,find,play,read', `class order without Writing (flag off): ${p.steps.map(s => s.type)}`);
+ok(p.steps.every(s => s.status === 'pending') && p.steps.find(s => s.type === 'sing').required === false, 'all pending; Sing is optional');
+ok(G.stepMode(p.steps[1], { mic: true }) === 'full' && G.stepMode(p.steps[1], { mic: false }) === 'self', 'Sing: mic → full, no mic → "I sang it" fallback');
+ok(G.stepMode({ type: 'mystery' }, {}) === 'unavailable', 'unknown step type → unavailable');
+const noMic = G.buildPlan('2026-10-25', 'hcb', {});
+ok(noMic.steps.find(s => s.type === 'sing').status === 'pending', 'no mic: Sing still in the plan (runs its fallback), not dropped');
+p.steps[0].status = 'done'; p.steps[1].status = 'skipped'; p.steps[2].status = 'active';
+ok(G.nextStep(p) === 2 && !G.planComplete(p), 'next = first pending/active; not complete yet');
+['find', 'play', 'read'].forEach(t => p.steps.find(s => s.type === t).status = 'done');
+ok(G.planComplete(p) && G.nextStep(p) === -1, 'complete when every REQUIRED step is done (skipped Sing allowed)');
+
+// rewards: once per step id; a replay only tops up, never past the step max
+const q = G.buildPlan('2026-10-25', 'drd', { mic: true }), play = q.steps.find(s => s.type === 'play'), hear = q.steps[0];
+ok(G.topUp(q, hear, 1) === 1 && G.topUp(q, hear, 1) === 0, 'hear pays 1 once; the replay pays 0');
+ok(G.topUp(q, play, 1) === 1 && G.topUp(q, play, 3) === 2 && G.topUp(q, play, 2) === 0 && G.topUp(q, play, 9) === 0, 'play: 1, then tops up to 3, never more');
+ok(G.topUp(q, q.steps[2], 0) === 1, 'finishing a step always pays at least 1');
+ok(G.planBerries(q) === 5, 'plan total = sum of step rewards');
+
+// restore: same day only, damaged/old formats rebuild, nothing re-granted
+const snap = JSON.parse(JSON.stringify(q)); snap.steps[0].status = 'done'; snap.steps[1].status = 'active';
+const r = G.restorePlan(snap, '2026-10-25', ids);
+ok(r && r.steps[1].status === 'pending' && r.steps[0].status === 'done' && r.rewarded.play === 3, 'restore: an active step runs again; done + rewards kept');
+ok(G.topUp(r, r.steps.find(s => s.type === 'play'), 3) === 0, 'after a reload the same step cannot pay twice');
+ok(G.restorePlan(snap, '2026-10-26', ids) === null, 'yesterday\'s plan → null (fresh day)');
+ok(G.restorePlan(Object.assign({}, snap, { song: 'gone' }), '2026-10-25', ids) === null, 'unknown song → null');
+ok(G.restorePlan({ day: '2026-10-25', song: 'drm', i: 1, berries: 2 }, '2026-10-25', ids) === null, 'PR3-format snapshot (no steps) → null');
+ok(G.restorePlan({ day: '2026-10-25', song: 'drm', steps: [null] }, '2026-10-25', ids) === null && G.restorePlan('x', '2026-10-25', ids) === null, 'damaged snapshot → null, no throw');
+const odd = G.restorePlan(Object.assign({}, snap, { steps: snap.steps.concat([{ id: 'dance', type: 'dance', status: 'pending' }]), rewarded: { play: 99, hear: -1, ghost: 2 } }), '2026-10-25', ids);
+ok(odd.steps[odd.steps.length - 1].status === 'unavailable' && odd.steps[odd.steps.length - 1].required === false, 'a step type from a newer version → unavailable, never required');
+ok(odd.rewarded.play === 3 && !('hear' in odd.rewarded) && !('ghost' in odd.rewarded), 'rewards clamped to the step max; junk dropped');
+
+// the sung tune: opening notes up to the first rest
+ok(G.singPattern(G.SONGS.find(s => s.id === 'hcb')).join() === '64,62,60' && G.singPattern(G.SONGS.find(s => s.id === 'hill')).join() === '60,62,64,65', 'sing pattern = opening phrase, 2–4 notes');
+ok(G.SONGS.every(s => { const n = G.singPattern(s).length; return n >= 2 && n <= 4; }), 'every song has a 2–4 note sing pattern');
+
 console.log(fail ? `\nGARDEN TEST FAIL (${fail})` : '\nGARDEN TEST PASS');
 process.exit(fail ? 1 : 0);

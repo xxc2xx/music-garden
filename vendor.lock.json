@@ -1,7 +1,7 @@
 {
   "source": "pitch-trainer",
-  "sourceCommit": "2ba8bae",
-  "syncedAt": "2026-10-25T01:23:56.201Z",
+  "sourceCommit": "29e3764",
+  "syncedAt": "2026-10-25T12:39:29.177Z",
   "modules": {
     "music-core.js": {
       "version": "1.2.1",
@@ -57,6 +57,11 @@
         "schedule",
         "use"
       ]
+    },
+    "echo.js": {
+      "version": "1.0.0",
+      "sha256": "be85af1e3058542e443e2464cf54902a08d05899a5d6ed008bb71a53afc4b741",
+      "uses": []
     }
   }
 }

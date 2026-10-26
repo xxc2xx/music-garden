@@ -1,8 +1,12 @@
 /* garden.js — Music Garden, the kid-facing app (index.html).
-   Classic script → window.Garden. Depends on music-core.js, hear.js, midi.js, sound.js.
+   Classic script → window.Garden. Depends on music-core.js, hear.js, midi.js, sound.js, echo.js.
 
    Screens: home · book (her Yamaha book tunes) · song (Listen / Learn / Play!) ·
-   quiz (read the staff) · free piano · done · grown-ups (press-and-hold gate).
+   quiz (read the staff) · sing (Today only) · free piano · done ·
+   grown-ups (press-and-hold gate).
+
+   Today (Play today) follows her class order, one song a day:
+     hear → sing → find (Learn) → play (Play!) → read (3 quiz questions).
 
    Song screen
      Listen  the app plays the tune; the playhead walks the staff.
@@ -23,7 +27,9 @@
   const $ = (s) => document.querySelector(s);
   const now = () => performance.now() / 1000;
 
-  const { SONGS, beatsPerBar, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors } = window.GardenCore;
+  const { SONGS, beatsPerBar, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors,
+    stepMode, buildPlan, restorePlan, nextStep, topUp, planBerries, singPattern } = window.GardenCore;
+  const RULES = window.GardenRules;
   const WIN = window.GardenCore.WIN, POINTS = window.GardenCore.POINTS;
 
   /* ── State ── */
@@ -47,12 +53,23 @@
     s.songs = obj(s.songs); s.quiz = obj(s.quiz);
     s.days = Array.isArray(s.days) ? s.days.filter(d => typeof d === 'string') : [];
     s.berries = Number.isFinite(s.berries) && s.berries >= 0 ? Math.floor(s.berries) : 0;
+    if(!s.today || typeof s.today !== 'object') delete s.today;            // checked properly by restorePlan
+    if(!s.grants || typeof s.grants.day !== 'string' || !s.grants.keys || typeof s.grants.keys !== 'object') delete s.grants;
     return s;
   }
   function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
   const S = () => state.settings;
   function markDay(){ const d = MC.dayKey(new Date()); if(!state.days.includes(d)){ state.days.push(d); state.days = state.days.slice(-120); } }
   function addBerries(n){ state.berries += n; markDay(); save(); $('#berryCount').textContent = state.berries; }
+  // outside Today: a reward that may be paid once per day (G8 — replaying a
+  // song can't farm strawberries). n = what the key is worth; pays the increase.
+  function grantOnce(key, n){
+    const day = MC.dayKey(new Date());
+    if(!state.grants || state.grants.day !== day) state.grants = { day, keys: {} };
+    const add = Math.max(0, n - (state.grants.keys[key] || 0));
+    if(add){ state.grants.keys[key] = n; addBerries(add); } else { markDay(); save(); }
+    return add;
+  }
   function latencySec(){
     let ms = null;
     try{ const v = localStorage.getItem(LAT_KEY); if(v != null && v !== '') ms = +v; }catch(e){}
@@ -356,15 +373,16 @@
   // life.timeout, and show() ends the old Life first — so a callback can
   // never act on a screen she has already left (audit G1/G2).
   function makeLife(){
-    const ids = new Set(); let alive = true;
+    const ids = new Set(), ends = []; let alive = true;
     return {
       get alive(){ return alive; },
       timeout(fn, ms){ if(!alive) return 0; const id = setTimeout(() => { ids.delete(id); if(alive) fn(); }, ms); ids.add(id); return id; },
-      end(){ alive = false; ids.forEach(clearTimeout); ids.clear(); },
+      onEnd(fn){ if(alive) ends.push(fn); else fn(); },
+      end(){ alive = false; ids.forEach(clearTimeout); ids.clear(); ends.splice(0).forEach(f => { try{ f(); }catch(e){ noteError('life', e.message); } }); },
     };
   }
   let life = makeLife();
-  const SCREENS = ['home', 'book', 'song', 'quiz', 'done', 'free', 'grown'];
+  const SCREENS = ['home', 'book', 'song', 'quiz', 'sing', 'done', 'free', 'grown'];
   function show(id){
     life.end(); life = makeLife();
     stopRun(); micStop();
@@ -466,7 +484,8 @@
   $('#mListen').addEventListener('click', () => {
     const c = actx(); if(!c){ toast('Sound is not available on this device'); return; } stopRun(); resetPaint(); $('#result').hidden = true;
     const spb = 60 / S().tempo, t0 = c.currentTime + 0.5, off = now() - c.currentTime, lat = latencySec();
-    const r = run = { mode: 'listen', alive: true, timers: [], spb, beat0: t0 + off + lat };
+    const r = run = { mode: 'listen', alive: true, timers: [], spb, beat0: t0 + off + lat,
+      ses: track('g-song', Object.assign({ contentId: cur.id, extra: { mode: 'listen', title: cur.title } }, planRef())) };
     targetsOf(cur).forEach(t => {
       Sound.schedule(t.m, t0 + t.beat * spb, t.b * spb * 0.92, { vel: 90, tag: 'listen' });
       r.timers.push(setTimeout(() => { if(r.alive){ flash(t.m); setNow(t.i); } }, (t0 - c.currentTime + t.beat * spb + lat) * 1000));
@@ -474,7 +493,14 @@
     muteUntil = now() + 0.5 + songBeats(cur) * spb + 0.5;
     animate(r, () => songBeats(cur));
     $('#songMsg').textContent = 'Listen…';
-    r.timers.push(setTimeout(() => { if(r.alive){ stopRun(); setNow(null); $('#songMsg').textContent = 'Your turn! Tap Learn or Play!'; } }, (0.6 + songBeats(cur) * spb + lat) * 1000));
+    r.timers.push(setTimeout(() => {
+      if(!r.alive) return;
+      close(r.ses, 'completed', { notes: targetsOf(cur).length }); stopRun(); setNow(null);
+      if(atStep('hear')){
+        stepDone(1); chime(); say('Lovely listening! Now sing it.');
+        showResult({ title: 'Lovely listening!', berries: today.plan.rewarded.hear || 0, lines: ['Next: sing it!'], again: () => $('#mListen').click() });
+      } else $('#songMsg').textContent = 'Your turn! Tap Learn or Play!';
+    }, (0.6 + songBeats(cur) * spb + lat) * 1000));
   });
 
   function animate(r, total){
@@ -497,7 +523,7 @@
     actx(); stopRun(); resetPaint(); $('#result').hidden = true;
     const tg = targetsOf(cur);
     const r = run = { mode: 'learn', alive: true, timers: [], k: 0, tries: tg.map(() => 0), events: [], t0: now(),
-      ses: track('g-song', { contentId: cur.id, extra: { mode: 'learn', title: cur.title } }) };
+      ses: track('g-song', Object.assign({ contentId: cur.id, extra: { mode: 'learn', title: cur.title } }, planRef())) };
     micStart();
     const step = () => {
       const t = tg[r.k]; setNow(t.i);
@@ -526,9 +552,11 @@
   });
   function finishLearn(r, tg){
     r.alive = false; run = null; micStop();              // the run is over: release the mic
-    const first = r.tries.filter(x => x === 0).length, pct = Math.round(first / tg.length * 100), berries = berriesFor(pct);
+    const first = r.tries.filter(x => x === 0).length, pct = Math.round(first / tg.length * 100);
+    let berries = berriesFor(pct);
     close(r.ses, 'completed', { score: pct, first, n: tg.length });
     record({ mode: 'learn', score: pct, berries, tally: { first, n: tg.length } });
+    if(atStep('find')){ stepDone(berries); berries = today.plan.rewarded.find || berries; }   // Today: show what the step paid
     if(S().input !== 'mic') chime();
     say(berries >= 2 ? 'You played it all! Now try it with the beat.' : 'You did it! Let\'s practise once more.');
     showResult({ title: berries >= 2 ? 'You played it all!' : 'You did it!', berries,
@@ -547,7 +575,7 @@
     micStart();
     const r = run = { mode: 'play', alive: true, timers: [], spb, beat0: acBeat0 + off + lat, tg, judged: tg.map(() => null),
       wrong: tg.map(() => false), events: [], combo: 0, maxCombo: 0, shownCount: null, lastSrc: 'screen',
-      ses: track('g-song', { contentId: cur.id, extra: { mode: 'play', title: cur.title, bpm: S().tempo } }) };
+      ses: track('g-song', Object.assign({ contentId: cur.id, extra: { mode: 'play', title: cur.title, bpm: S().tempo } }, planRef())) };
     clickTimes = [];
     for(let k = -count; k < total; k++){
       const t = acBeat0 + k * spb;
@@ -599,13 +627,15 @@
   }
   function finishPlay(r){
     sink = null; clickTimes = []; $('#combo').hidden = true; setNow(null); micStop();
-    const pct = scoreOf(r.judged), berries = berriesFor(pct), tim = timingSummary(r.judged);
+    const pct = scoreOf(r.judged), tim = timingSummary(r.judged);
+    let berries = berriesFor(pct);
     const tally = { great: 0, good: 0, ok: 0, wrong: 0, miss: 0 };
     r.judged.forEach(j => tally[j ? j.v : 'miss']++);
     close(r.ses, 'completed', { score: pct, tally, biasMs: tim.bias, sdMs: tim.sd, bpm: S().tempo, combo: r.maxCombo });
     const wrongNotes = r.judged.map((j, k) => j && j.v === 'wrong' ? r.tg[k].m : null).filter(x => x != null);
     record({ mode: 'play', score: pct, berries, tally, bias: tim.bias, sd: tim.sd, combo: r.maxCombo, bpm: S().tempo, events: r.events,
       wrong: wrongNotes });
+    if(atStep('play')){ stepDone(berries); berries = today.plan.rewarded.play || berries; }   // Today: show what the step paid
     run = { mode: 'played', last: r };
     if(S().input !== 'mic') chime();
     const title = pct >= 85 ? 'Wonderful!' : pct >= 60 ? 'Great job!' : pct >= 30 ? 'Good try!' : "Let's try again!";
@@ -625,9 +655,11 @@
     rec.attempts = rec.attempts.slice(-15);
     if(a.mode === 'play') rec.best = Math.max(prevBest, a.berries);
     else rec.best = Math.max(prevBest, Math.min(1, a.berries));       // Learn alone earns at most 1 on the book
-    const gained = Math.max(0, rec.best - prevBest) + (a.berries > 0 ? 1 : 0);
-    addBerries(gained);
-    if(today) today.berries += gained;
+    // Today pays per step (stepDone). Free play: a better book score pays the
+    // difference; taking part pays 1 once a day per song and mode (G8).
+    const better = Math.max(0, rec.best - prevBest);
+    if(today){ markDay(); save(); }
+    else { if(better) addBerries(better); grantOnce(`song:${cur.id}:${a.mode}`, a.berries > 0 ? 1 : 0); }
     drawSongBerries();
   }
 
@@ -678,7 +710,7 @@
     p.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
       const a = b.dataset.a;
       if(a === 'today') { $('#result').hidden = true; todayNext(); }
-      else if(a === 'again') { $('#result').hidden = true; (o.chart ? startPlay : () => $('#mLearn').click())(); }
+      else if(a === 'again') { $('#result').hidden = true; (o.again || (o.chart ? startPlay : () => $('#mLearn').click()))(); }
       else if(a === 'play') { $('#result').hidden = true; startPlay(); }
       else if(a === 'hear') replay(o.chart);
       else if(a === 'book') openBook();
@@ -713,7 +745,7 @@
     actx(); show('quiz');
     const kinds = ['name', 'name', 'find', 'song', 'name', 'find', 'name', 'song', 'name', 'name'];
     quiz = { n: n || 8, k: 0, berries: 0, kinds: shuffle(kinds.slice(0, n || 8)), last: null,
-      ses: track('g-quiz', { extra: { n: n || 8, bass: S().bass }, planId: today ? today.planId : null }) };
+      ses: track('g-quiz', Object.assign({ extra: { n: n || 8, bass: S().bass } }, planRef())) };
     quizStep();
   }
   function quizDots(){ $('#quizDots').innerHTML = Array.from({ length: quiz.n }, (_, i) => `<i class="${i < quiz.k ? 'done' : i === quiz.k ? 'now' : ''}"></i>`).join(''); }
@@ -734,7 +766,7 @@
       if(MC.pc(picked) === MC.pc(m)){
         done = true; el.classList.add('right'); chime(); life.timeout(() => playTone(m, 0.7), 350);
         const st = state.quiz[m] = state.quiz[m] || { r: 0, n: 0 }; st.n++; if(firstTry) st.r++;
-        if(firstTry){ quiz.berries++; addBerries(1); if(today) today.berries++; }
+        if(firstTry){ quiz.berries++; if(!today) addBerries(1); }          // Today: the read step pays once at the end
         fb.innerHTML = `Yes! That's <span style="color:${textCol(m)}">&nbsp;${nameOf(m)}</span>`;
         say(`Yes! ${sayOf(m)}!`);
         life.timeout(() => { quiz.k++; quiz.k >= quiz.n ? quizDone() : quizStep(); }, 1700);
@@ -788,49 +820,221 @@
   function quizDone(){
     save();
     close(quiz.ses, 'completed', { right: quiz.berries, n: quiz.n });
-    if(today){ todayNext(); return; }
+    if(atStep('read')){ stepDone(quiz.berries); todayNext(); return; }
     showDone(quiz.berries, `You read ${quiz.berries} of ${quiz.n} notes on the first try!`);
   }
 
-  /* ── Today: quiz warm-up → learn the song → play it with the beat ── */
-  let today = null;
+  /* ── Today V2 (plan D5): hear → sing → find → play → read, one song ──
+     The plan is a daily snapshot (state.today, mirrored to the practice log
+     as item 'plan:<day>'): a refresh or closed app resumes at the first step
+     not yet done. Each step pays its strawberries once — rewarded[stepId] —
+     and a replay only tops up to its best, so reloads and Again can't farm
+     (G8). Partial steps pay nothing. When the day's plan is finished, Play
+     today runs the same steps again for fun, paying top-ups only. */
+  let today = null;                    // { plan, song, i, ses }
+  let micBlocked = false;              // she (or iOS) said no to the mic this visit → Sing runs its fallback
+  const caps = () => ({ mic: !micBlocked && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) });
+  const curStep = () => (today && today.i != null ? today.plan.steps[today.i] : null);
+  // the activity she just finished belongs to this Today step (Again on a done step only tops up)
+  const atStep = (type) => { const st = curStep(); return !!st && st.type === type && (st.status === 'active' || st.status === 'done'); };
+  const planRef = () => (today ? { planId: today.plan.id, stepIdx: today.i } : {});
   function currentSong(){
     return SONGS.find(sg => ((state.songs[sg.id] || {}).best || 0) < 2) || SONGS[SONGS.length - 1];
   }
-  // Today's plan is saved per day, so a refresh / closed app resumes at the
-  // same step instead of starting over (G5). Rewards per step: PR4.
   function startToday(){
     actx();
-    const day = MC.dayKey(new Date()), snap = state.today;
-    const resume = snap && snap.day === day && !snap.done && SONGS.some(x => x.id === snap.song) && snap.i >= 0;
-    const song = resume ? SONGS.find(x => x.id === snap.song) : currentSong();
-    today = { steps: [{ t: 'quiz' }, { t: 'learn', song }, { t: 'play', song }], i: resume ? snap.i - 1 : -1,
-      berries: resume ? snap.berries || 0 : 0, planId: 'p_' + day, day };
-    today.ses = track('g-today', { planId: today.planId, contentId: song.id, extra: { resumedAt: resume ? snap.i : null } });
-    openSessions.delete(today.ses);            // spans several screens; ended by todayNext / Home
-    todayNext();
+    const day = MC.dayKey(new Date());
+    let plan = restorePlan(state.today, day, SONGS.map(x => x.id));
+    const resumed = !!plan;
+    if(plan && nextStep(plan) < 0) plan.steps.forEach(st => { if(st.status !== 'unavailable') st.status = 'pending'; });   // another round today
+    if(!plan) plan = buildPlan(day, currentSong().id, caps());
+    today = { plan, song: SONGS.find(x => x.id === plan.song), i: null };
+    today.ses = track('g-today', { planId: plan.id, contentId: plan.song, extra: { resumed, at: resumed ? nextStep(plan) : 0 } });
+    openSessions.delete(today.ses);            // spans several screens; ended by finishToday / Home
+    enterStep();
   }
-  function saveToday(done){
-    state.today = { day: today.day, rules: window.GardenRules.version, song: today.steps[1].song.id, i: today.i, berries: today.berries, done: !!done };
+  function saveToday(){
+    const p = today.plan;
+    state.today = { id: p.id, day: p.day, rules: p.rules, song: p.song, steps: p.steps.map(st => ({ id: st.id, type: st.type, status: st.status })), rewarded: Object.assign({}, p.rewarded) };
     save();
+    const L = learnStore();
+    if(L && L.setItem) L.setItem('plan:' + p.day, Object.assign({ schema: 1, env: MC.env() || 'prod' }, state.today)).catch(() => {});
+  }
+  function dotsHtml(){
+    return today.plan.steps.filter(st => st.status !== 'unavailable')
+      .map(st => `<i class="${st === curStep() ? 'now' : st.status === 'done' || st.status === 'skipped' ? 'done' : ''}"></i>`).join('');
   }
   function drawDots(){
     const d = $('#songDots');
     if(!today){ d.hidden = true; return; }
-    d.hidden = false;
-    d.innerHTML = today.steps.map((_, i) => `<i class="${i < today.i ? 'done' : i === today.i ? 'now' : ''}"></i>`).join('');
+    d.hidden = false; d.innerHTML = dotsHtml();
   }
-  function todayNext(){
+  function enterStep(){
     if(!today) return;
-    today.i++;
-    const st = today.steps[today.i];
-    saveToday(!st);
-    today.ses.rec.stepIdx = today.i;
-    if(!st){ const b = today.berries; close(today.ses, 'completed', { berries: b, steps: today.steps.length }); showDone(Math.min(3, b), `You picked ${b} strawberr${b === 1 ? 'y' : 'ies'} today. See you tomorrow!`); today = null; return; }
-    if(st.t === 'quiz') openQuiz(4);
-    else if(st.t === 'learn') { openSong(st.song, { only: 'mLearn', msg: `Let's learn ${st.song.title}. Tap Learn!` }); say(`Let's learn ${st.song.title}.`); }
-    else { openSong(st.song, { only: 'mPlay', msg: 'Now with the beat. Tap Play!' }); say('Now play it with the beat!'); }
+    const p = today.plan, i = nextStep(p);
+    if(i < 0) return finishToday();
+    const st = p.steps[i], mode = stepMode(st, caps());     // needs checked again as the step starts
+    if(mode === 'unavailable'){ st.status = 'unavailable'; saveToday(); return enterStep(); }
+    today.i = i; st.status = 'active'; saveToday();
+    today.ses.rec.stepIdx = i;
+    const song = today.song;
+    if(st.type === 'hear'){ openSong(song, { only: 'mListen', msg: `Let's listen to ${song.title}. Tap Listen!` }); say(`Let's listen to ${song.title}.`); }
+    else if(st.type === 'sing') openSing(song, mode);
+    else if(st.type === 'find'){ openSong(song, { only: 'mLearn', msg: 'Find the notes on the piano. Tap Learn!' }); say('Now find the notes on the piano.'); }
+    else if(st.type === 'play'){ openSong(song, { only: 'mPlay', msg: 'Now with the beat. Tap Play!' }); say('Now play it with the beat!'); }
+    else if(st.type === 'read') openQuiz(RULES.today.readQs);
   }
+  // the current step is finished: mark it and pay its strawberries (once)
+  function stepDone(earned){
+    const st = curStep(); if(!st) return 0;
+    st.status = 'done';
+    const add = topUp(today.plan, st, earned);
+    if(add) addBerries(add); else { markDay(); save(); }
+    saveToday(); drawDots();
+    return add;
+  }
+  function stepSkip(){
+    const st = curStep(); if(!st || st.required) return;
+    st.status = 'skipped'; saveToday(); todayNext();
+  }
+  function todayNext(){ if(today) enterStep(); }
+  function finishToday(){
+    const p = today.plan, b = planBerries(p);
+    close(today.ses, 'completed', { berries: b, steps: p.steps.map(st => `${st.id}:${st.status}`).join(' ') });
+    today = null;
+    showDone(Math.min(3, b), `You picked ${b} strawberr${b === 1 ? 'y' : 'ies'} today. See you tomorrow!`);
+  }
+
+  /* ── Sing (a Today step): hear a little tune, sing it back ──
+     mode 'full'  the mic opens only while she sings (G3) and judges the SHAPE
+                  of the tune (Echo.matchSung): clear pitch → correct / wrong
+                  (mic-verified); too quiet or unclear → uncertain.
+     mode 'self'  no mic here, or not allowed → she sings along and taps
+                  "I sang it" (self-reported). "I sang it" is always offered.
+     Only mic-verified answers count toward singing accuracy (D5); self and
+     uncertain count as taking part. */
+  let sing = null;
+  function openSing(song, mode){
+    actx(); show('sing');
+    const pat = singPattern(song);
+    sing = { song, pat, mode, tries: 0, done: false, listening: null,
+      ses: track('g-sing', Object.assign({ contentId: song.id, extra: { mode, pattern: pat } }, planRef())) };
+    life.onEnd(singEnd);
+    $('#singNotes').innerHTML = pat.map(m => `<i style="background:${MC.colorOf(m)};color:${inkOn(m)}">${shortOf(m)}</i>`).join('');
+    $('#singDots').innerHTML = today ? dotsHtml() : '';
+    $('#singNext').hidden = true;
+    drawSing();
+    singHear(true);
+  }
+  function drawSing(msg){
+    const self = sing.mode !== 'full';
+    $('#singQ').textContent = self ? 'Sing along!' : 'Listen, then sing it back!';
+    $('#singGo').hidden = self || sing.done;
+    $('#singSelf').hidden = sing.done;
+    $('#singSkip').hidden = sing.done || !(today && curStep() && !curStep().required);
+    $('#singFb').textContent = msg != null ? msg : self ? 'Sing with the music, then tap "I sang it!"' : 'Tap My turn and sing!';
+  }
+  function lightSing(k, upTo){
+    document.querySelectorAll('#singNotes i').forEach((el, j) => el.classList.toggle('on', upTo ? j <= k : j === k));
+  }
+  function singHear(intro){
+    const c = actx(); if(!c || !sing) return;
+    singStopMic();
+    try{ Sound.cancel('sing'); }catch(e){}
+    const gap = 0.7, wait = intro ? 2.2 : 0.2, t0 = c.currentTime + wait;       // intro: after the spoken hint
+    if(intro) say(sing.mode === 'full' ? 'Listen, then sing it back!' : 'Sing along with me!');
+    sing.pat.forEach((m, k) => { Sound.schedule(m, t0 + k * gap, gap * 0.85, { vel: 90, tag: 'sing' }); life.timeout(() => lightSing(k), (wait + k * gap) * 1000); });
+    life.timeout(() => lightSing(-1), (wait + sing.pat.length * gap) * 1000);
+    muteUntil = Math.max(muteUntil === Infinity ? 0 : muteUntil, now() + wait + sing.pat.length * gap + 0.3);
+  }
+  async function singListen(){
+    if(!sing || sing.done || sing.listening) return;
+    const c = actx(), md = navigator.mediaDevices;
+    if(!c || !md || !md.getUserMedia) return singFallback('none');
+    const me = sing, myLife = life;
+    me.listening = { starting: true };
+    $('#singFb').textContent = 'Getting ready…';
+    let stream;
+    try{ stream = await md.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+    catch(e){ me.listening = null; if(myLife.alive && sing === me) singFallback(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'denied' : 'error'); return; }
+    if(!myLife.alive || sing !== me || !me.listening){ stream.getTracks().forEach(t => t.stop()); return; }
+    const src = c.createMediaStreamSource(stream), an = c.createAnalyser();
+    an.fftSize = 2048; an.smoothingTimeConstant = 0; src.connect(an);
+    const buf = new Float32Array(an.fftSize), seg = Echo.liveSeg(), sung = [], clar = [], t0 = now();
+    const R = RULES.sing, minC = RULES.skills.echo.minClarity;
+    let lastVoice = null;
+    $('#singFb').textContent = "I'm listening…"; $('#singGo').classList.add('listening');
+    const iv = setInterval(() => {
+      if(sing !== me || !me.listening) return;
+      an.getFloatTimeDomainData(buf);
+      let r = 0; for(let i = 0; i < buf.length; i++) r += buf[i] * buf[i]; r = Math.sqrt(r / buf.length);
+      const t = now(), res = t < muteUntil || r < 0.01 ? null : Hear.mpm(buf, c.sampleRate);
+      const mf = res && res.clarity >= minC ? 69 + 12 * Math.log2(res.freq / 440) : null;
+      if(mf != null){ lastVoice = t; clar.push(res.clarity); }
+      const n = seg.push(mf, t * 1000);
+      if(n){ sung.push(n.m); lightSing(sung.length - 1, true); }
+      const quiet = lastVoice != null && !seg.busy && t - lastVoice > R.quietSec;
+      if(sung.length >= me.pat.length || quiet || t - t0 > R.listenSec){
+        const f = seg.flush(); if(f) sung.push(f.m);
+        singJudge(sung, clar);
+      }
+    }, 20);
+    me.listening = { stream, src, iv };
+  }
+  function singStopMic(){
+    const l = sing && sing.listening; if(!l) return;
+    if(l.iv) clearInterval(l.iv);
+    try{ l.stream && l.stream.getTracks().forEach(t => t.stop()); }catch(e){}
+    try{ l.src && l.src.disconnect(); }catch(e){}
+    sing.listening = null; $('#singGo').classList.remove('listening');
+  }
+  function singEnd(){ singStopMic(); try{ Sound.cancel('sing'); }catch(e){} sing = null; }
+  function singJudge(sung, clar){
+    singStopMic();
+    sing.tries++;
+    const pat = sing.pat, conf = clar.length ? +(clar.reduce((a, b) => a + b, 0) / clar.length).toFixed(2) : null;
+    let outcome = 'uncertain', evidence = 'mic-uncertain';
+    if(sung.length >= pat.length){ outcome = Echo.matchSung(pat, sung.slice(0, pat.length)).ok ? 'correct' : 'wrong'; evidence = 'mic-verified'; }
+    sing.ses.attempt({ skill: 'echo', target: { pattern: pat }, observed: sung.length ? { pattern: sung.slice(0, 8) } : null,
+      outcome, evidence, conf, firstTry: sing.tries === 1 });
+    if(outcome === 'correct'){ chime(); say('Beautiful singing!'); return singFinish('correct', 'Beautiful singing!'); }
+    if(outcome === 'wrong'){
+      if(sing.tries >= RULES.sing.maxTries){ say('Lovely singing!'); return singFinish('wrong', 'Lovely singing!'); }
+      say('Nice! Listen again, then sing.'); drawSing('Listen again, then tap My turn!'); singHear(false); return;
+    }
+    say("I couldn't hear you. Sing a little louder!"); drawSing('Sing a little louder — or tap "I sang it!"');
+  }
+  function singFallback(reason){
+    if(reason !== 'error') micBlocked = true;
+    sing.ses.attempt({ skill: 'echo', target: { pattern: sing.pat }, observed: null, outcome: 'unavailable', evidence: 'none', firstTry: false, extra: { reason } });
+    sing.mode = 'self';
+    drawSing(reason === 'error' ? 'The microphone is busy — sing along and tap "I sang it!"' : 'Sing along, then tap "I sang it!"');
+    singHear(false);
+  }
+  function singFinish(outcome, msg){
+    sing.done = true;
+    close(sing.ses, 'completed', { outcome, tries: sing.tries, mode: sing.mode });
+    const add = atStep('sing') ? stepDone(1) : 0;
+    lightSing(sing.pat.length, true);
+    drawSing(msg + (add ? ` +${add} strawberr${add === 1 ? 'y' : 'ies'}!` : ''));
+    $('#singNext').hidden = !today;
+  }
+  $('#singGo').addEventListener('click', () => singListen());
+  $('#singHear').addEventListener('click', () => { if(sing && !sing.done) singHear(false); });
+  $('#singSelf').addEventListener('click', () => {
+    if(!sing || sing.done) return;
+    singStopMic(); sing.tries++;
+    sing.ses.attempt({ skill: 'echo', target: { pattern: sing.pat }, observed: null, outcome: 'self', evidence: 'self', firstTry: sing.tries === 1 });
+    chime(); say('Lovely singing!'); singFinish('self', 'Lovely singing!');
+  });
+  $('#singSkip').addEventListener('click', () => {
+    if(!sing || sing.done) return;
+    singStopMic();
+    sing.ses.attempt({ skill: 'echo', target: { pattern: sing.pat }, observed: null, outcome: 'skipped', evidence: 'none', firstTry: false });
+    close(sing.ses, 'exited', { outcome: 'skipped', tries: sing.tries });
+    stepSkip();
+  });
+  $('#singNext').addEventListener('click', () => todayNext());
   function showDone(berries, msg){
     show('done');
     $('#doneBerries').innerHTML = [0, 1, 2].map(i => `<svg viewBox="0 0 100 110" aria-hidden="true"><use href="#i-berry${i < berries ? '' : '-off'}"/></svg>`).join('');
@@ -993,7 +1197,7 @@
 
   window.addEventListener('resize', () => { if(!$('#song').hidden && cur && !(run && run.alive)) drawStaff(); });
   document.addEventListener('visibilitychange', () => {
-    if(document.hidden){ stopRun(); micStop(); openSessions.forEach(h => h.pause()); if(today && today.ses) today.ses.pause(); }
+    if(document.hidden){ stopRun(); micStop(); if(sing){ singStopMic(); if(!sing.done) drawSing(); } openSessions.forEach(h => h.pause()); if(today && today.ses) today.ses.pause(); }
     else { openSessions.forEach(h => h.resume()); if(today && today.ses) today.ses.resume(); }
   });
 
@@ -1012,7 +1216,7 @@
     return { env: MC.env ? (MC.env() || 'prod') : '?', screen: vis, run: run ? run.mode + (run.alive ? ' (live)' : '') : '—',
       timers: run && run.timers ? run.timers.length : 0, audio: ac ? ac.state : 'none', input: S().input,
       midi: midiStatus.state + (midiStatus.names.length ? ' ' + midiStatus.names.join(',') : ''), mic: mic ? (mic.iv ? 'open' : 'starting') : 'off',
-      muted: muteUntil === Infinity ? 'speaking' : muteUntil > now() ? 'yes' : 'no', today: today ? `step ${today.i + 1}/${today.steps.length}` : '—',
+      muted: muteUntil === Infinity ? 'speaking' : muteUntil > now() ? 'yes' : 'no', today: today ? `${curStep() ? curStep().id : '?'} (${today.i + 1}/${today.plan.steps.length}) · ${planBerries(today.plan)} paid` : '—',
       rules: window.GardenRules.version, errors: errors.length };
   }
   if(DEBUG){
@@ -1025,5 +1229,6 @@
   show('home');
   if('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   window.Garden = { SONGS, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors, staffSvg, WIN, POINTS,
-    _state: () => state, _press: (m, src) => pressed(m, src || 'screen'), _run: () => run, _diag: diag, _errors: () => errors.slice() };
+    _state: () => state, _press: (m, src) => pressed(m, src || 'screen'), _run: () => run, _diag: diag, _errors: () => errors.slice(),
+    _todayNext: () => todayNext(), _plan: () => (today ? today.plan : null) };
 })();

@@ -132,6 +132,12 @@ svg.staff .wob{animation:wob .4s}
 .timing{align-self:stretch}
 .timing svg{display:block;width:100%;height:auto}
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.singnotes{display:flex;gap:clamp(12px,3vw,28px);justify-content:center;margin:clamp(8px,3vh,32px) 0}
+.singnotes i{width:clamp(70px,13vw,112px);height:clamp(70px,13vw,112px);border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:clamp(24px,4.4vw,38px);font-weight:800;opacity:.6;transition:opacity .15s,transform .15s;box-shadow:0 6px 0 rgba(58,46,79,.2)}
+.singnotes i.on{opacity:1;transform:scale(1.12)}
+#singGo.listening{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.06)}}
+@media (prefers-reduced-motion:reduce){#singGo.listening{animation:none;outline:5px solid var(--ink)}}
 
 /* ── book ── */
 .book{flex:1;min-height:0;overflow-y:auto;align-self:stretch;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:14px;padding:4px 2px 12px;align-content:start}
@@ -332,6 +338,24 @@ svg.staff .wob{animation:wob .4s}
     <div class="feedback" id="quizFb"></div>
   </section>
 
+  <!-- SING (a Today step) -->
+  <section class="screen" id="sing" hidden>
+    <div class="bar">
+      <button class="sq home" type="button" aria-label="Home"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3A2E4F" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+      <div class="dots" id="singDots"></div>
+      <button class="again" type="button" id="singHear"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3A2E4F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z" fill="#3A2E4F"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>Hear it</button>
+    </div>
+    <h2 id="singQ"></h2>
+    <div class="singnotes" id="singNotes" aria-hidden="true"></div>
+    <button class="go" type="button" id="singGo"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="#fff"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>My turn</button>
+    <div class="feedback" id="singFb" role="status"></div>
+    <div class="btnrow">
+      <button class="ghostbtn" type="button" id="singSelf">I sang it!</button>
+      <button class="ghostbtn" type="button" id="singSkip">Skip</button>
+      <button class="go" type="button" id="singNext" hidden>Next</button>
+    </div>
+  </section>
+
   <!-- DONE -->
   <section class="screen" id="done" hidden>
     <div class="scene" aria-hidden="true"><div class="sky"></div><div class="hill"></div></div>
@@ -418,6 +442,7 @@ svg.staff .wob{animation:wob .4s}
 <script src="hear.js"></script>
 <script src="midi.js"></script>
 <script src="sound.js"></script>
+<script src="echo.js"></script>
 <script src="garden-rules.js"></script>
 <script src="garden-core.js"></script>
 <script src="garden.js"></script>

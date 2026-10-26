@@ -9,7 +9,7 @@ a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
 - `index.html` (markup, CSS, inline SVG art) + `garden.js` (all logic,
   classic script → `window.Garden`). No backend, no npm, no build step.
 - Vendored from `~/pitch-trainer`: `music-core.js`, `hear.js`, `midi.js`,
-  `sound.js`, pinned by `vendor.lock.json` (version, sha256, source commit,
+  `sound.js`, `echo.js` (pure `matchSung` / `liveSeg` only), pinned by `vendor.lock.json` (version, sha256, source commit,
   and the engine names this app uses). **Never edit them here** — a local
   edit fails `tools/shared.mjs verify`. Edit in pitch-trainer, run its
   `tools/consumers-test.sh` (proves the change against this repo's gate),
@@ -21,8 +21,9 @@ a note-reading quiz. Split out of `~/pitch-trainer` on 2026-10-24.
   storage is shared. Every name goes through `MusicCore.ns` (staging =
   `garden_v1@stg`, `musicEco_latencyMs@stg`, IDB `music-learn@stg`); never
   write an un-scoped name. Practice log = `MusicCore.learn()` (sessions
-  `g-song` / `g-quiz` / `g-today`, attempts with evidence); Today's step is
-  snapshotted in `garden_v1.today` so a refresh resumes. Grown-ups → Saved
+  `g-song` / `g-quiz` / `g-sing` / `g-today`, attempts with evidence); Today's
+  plan is snapshotted in `garden_v1.today` (+ practice-log item `plan:<day>`)
+  so a refresh resumes at the first unfinished step. Grown-ups → Saved
   progress = storage health + backup file export / merge-only restore. `sw.js` only deletes caches
   starting with its own prefix (`mg-`).
 
@@ -43,7 +44,14 @@ press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
   Only the note name is judged, not the octave.
 - **Note quiz**: name the note / which staff is X / name the shining note in
   a song; weighted toward notes she misses; bass clef is a grown-up toggle.
-- **Today**: 4-question quiz → Learn the current song → Play! it.
+- **Today** (class order, one song): Listen → Sing it back → Learn (find the
+  notes) → Play! → read 3 notes. Sing is optional: the mic opens only while
+  she sings and judges the tune's shape (mic-verified / uncertain); no mic or
+  mic denied → "I sang it" (self-reported, never counted as accuracy). Each
+  step pays strawberries once per day (`rewarded[stepId]`, Again only tops up
+  to the step max in `garden-rules.js` `today.rewards`); a finished day can be
+  replayed for fun with no extra pay. Outside Today a replayed song pays its
+  taking-part strawberry once a day (G8).
 - Input: on-screen keys, computer keys, MIDI (Chrome/Mac), or microphone
   (energy-onset + `Hear.pitchTracker`; ignores our own sounds via `muteUntil`
   and the beat clicks). Shares `musicEco_latencyMs` with Pitch Trainer.
@@ -65,7 +73,7 @@ press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
   (`~/busy-brain/claude-config/hooks/codex-review-run.sh ~/music-garden`) →
   push `dev` → `tools/stage.sh ~/music-garden dev <files…>` →
   `git -C $TMPDIR/stage-music-garden push origin HEAD:main`.
-  Files: index.html garden.js music-core.js hear.js midi.js sound.js sw.js manifest.json icon-192.png icon-512.png
+  Files: index.html garden.js garden-core.js garden-rules.js music-core.js hear.js midi.js sound.js echo.js sw.js manifest.json icon-192.png icon-512.png
 - Bump `CACHE` in `sw.js` when the file list changes; add new scripts to `STATIC`.
 - Tunes come from her book's exercises; use our own titles and no book lyrics
   or scans (Yamaha copyright).
