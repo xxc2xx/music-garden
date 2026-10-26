@@ -1,10 +1,10 @@
-const CACHE = 'staging-mg-v2';
+const CACHE = 'staging-mg-v3';
 // Every app on xxc2xx.github.io shares one Cache Storage (Pitch Trainer 'pt-',
 // Beat Hive 'bh-', old 'pitch-vN'): only ever delete OUR caches (same prefix).
 const PREFIX = CACHE.replace(/v\d+$/, '');
 
 const STATIC = ['./icon-192.png', './icon-512.png', './manifest.json',
-                './music-core.js', './hear.js', './midi.js', './sound.js', './garden-rules.js', './garden-core.js', './garden.js'];
+                './music-core.js', './hear.js', './midi.js', './sound.js', './echo.js', './garden-rules.js', './garden-core.js', './garden.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)).then(() => self.skipWaiting()));

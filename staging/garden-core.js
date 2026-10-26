@@ -62,8 +62,75 @@
     return out;
   }
 
+  /* ── Today's plan (plan D5): one stable snapshot per day ──
+     steps run in the rules' order; `needs` are checked on this device when
+     the plan is built AND again when a step starts. An optional step whose
+     need is missing runs its fallback (Sing → "I sang it"). The day is done
+     when every REQUIRED step is done. rewarded[stepId] = strawberries paid. */
+  const STEP_DEFS = {
+    hear:  { required: true,  needs: [] },
+    sing:  { required: false, needs: ['mic'], fallback: 'self' },
+    find:  { required: true,  needs: [] },
+    play:  { required: true,  needs: [] },
+    read:  { required: true,  needs: [] },
+    write: { required: false, needs: ['feature:write'] },
+  };
+  const STATUSES = ['pending', 'active', 'done', 'skipped', 'unavailable'];
+  const featureOn = (n) => !!(RULES.features || {})[n.slice(8)];
+  // how a step runs here: 'full', its fallback, or 'unavailable'
+  function stepMode(step, caps){
+    const def = STEP_DEFS[step && step.type]; if(!def) return 'unavailable';
+    const ok = def.needs.every(n => n.startsWith('feature:') ? featureOn(n) : !!(caps || {})[n]);
+    return ok ? 'full' : def.fallback || 'unavailable';
+  }
+  function buildPlan(day, songId, caps){
+    const steps = RULES.today.order
+      .filter(t => STEP_DEFS[t] && STEP_DEFS[t].needs.every(n => !n.startsWith('feature:') || featureOn(n)))   // a feature that is off: no dead step
+      .map(t => ({ id: t, type: t, required: STEP_DEFS[t].required, needs: STEP_DEFS[t].needs.slice(), fallback: STEP_DEFS[t].fallback || null, status: 'pending' }));
+    steps.forEach(s => { if(stepMode(s, caps) === 'unavailable') s.status = 'unavailable'; });
+    return { id: 'p_' + day, day, rules: RULES.version, song: songId, steps, rewarded: {} };
+  }
+  // a saved snapshot → today's plan, or null (other day, unknown song, old or
+  // damaged format: the caller builds a fresh one). A step type this version
+  // doesn't know becomes 'unavailable'; a step left 'active' runs again.
+  function restorePlan(snap, day, songIds){
+    if(!snap || typeof snap !== 'object' || snap.day !== day || !songIds.includes(snap.song) || !Array.isArray(snap.steps) || !snap.steps.length) return null;
+    const steps = [];
+    for(const s of snap.steps){
+      if(!s || typeof s.id !== 'string' || typeof s.type !== 'string') return null;
+      const known = !!STEP_DEFS[s.type], st = STATUSES.includes(s.status) ? s.status : 'pending';
+      steps.push({ id: s.id, type: s.type, required: known ? STEP_DEFS[s.type].required : false, needs: known ? STEP_DEFS[s.type].needs.slice() : [],
+        fallback: known ? STEP_DEFS[s.type].fallback || null : null, status: !known ? 'unavailable' : st === 'active' ? 'pending' : st });
+    }
+    const rewarded = {};
+    Object.entries(snap.rewarded && typeof snap.rewarded === 'object' ? snap.rewarded : {}).forEach(([k, v]) => {
+      const st = steps.find(s => s.id === k);
+      if(st && Number.isFinite(v) && v > 0) rewarded[k] = Math.min(Math.floor(v), RULES.today.rewards[st.type] || 1);
+    });
+    return { id: 'p_' + day, day, rules: typeof snap.rules === 'string' ? snap.rules : RULES.version, song: snap.song, steps, rewarded };
+  }
+  const nextStep = (plan) => plan.steps.findIndex(s => s.status === 'pending' || s.status === 'active');
+  const planComplete = (plan) => plan.steps.every(s => !s.required || s.status === 'done');
+  // a finished step earns 1..max (taking part always counts); a replay only
+  // pays the difference up to its best, so reloads and replays never re-grant
+  function topUp(plan, step, earned){
+    const max = RULES.today.rewards[step.type] || 1;
+    const n = Math.max(1, Math.min(max, Math.floor(earned) || 0)), had = plan.rewarded[step.id] || 0;
+    if(n <= had) return 0;
+    plan.rewarded[step.id] = n;
+    return n - had;
+  }
+  const planBerries = (plan) => Object.values(plan.rewarded).reduce((a, b) => a + b, 0);
+  // the little tune she sings back: the song's opening notes up to its first
+  // rest (2–4 notes), e.g. Hot Cross Buns → Mi Re Do
+  function singPattern(song){
+    const out = [];
+    for(const [m] of song.notes){ if(m == null){ if(out.length >= 2) break; continue; } out.push(m); if(out.length === 4) break; }
+    return out;
+  }
 
-  const GardenCore = { SONGS, beatsPerBar, targetsOf, songBeats, WIN, POINTS, verdictOf, scoreOf, berriesFor, timingSummary, distractors };
+  const GardenCore = { SONGS, beatsPerBar, targetsOf, songBeats, WIN, POINTS, verdictOf, scoreOf, berriesFor, timingSummary, distractors,
+    STEP_DEFS, stepMode, buildPlan, restorePlan, nextStep, planComplete, topUp, planBerries, singPattern };
   root.GardenCore = GardenCore;
   if(typeof module !== 'undefined' && module.exports) module.exports = GardenCore;
 })(typeof window !== 'undefined' ? window : globalThis);

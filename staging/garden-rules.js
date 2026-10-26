@@ -13,7 +13,7 @@
 (function(root){
   'use strict';
   const GardenRules = {
-    version: '2026.10.1',
+    version: '2026.10.2',
     skills: {
       pitch:   { what: 'hear a note → name or find it without a visual cue', masteryBox: 4, masteryDays: 2, regressMisses: [2, 5] },
       echo:    { what: 'sing back a heard pattern (microphone-verified only)', advanceGood: 4, easeMisses: 2, minClarity: 0.8 },
@@ -25,7 +25,12 @@
     review:      { intervalsDays: [1, 2, 4, 7, 14], maxPromotionsPerDay: 1 },
     difficulty:  { newNoteWhenMastered: true, unlockAccuracy: 0.85, unlockMinN: 10, tempo: { start: 60, step: 8, max: 92 } },
     frustration: { wrongInRow: 3, maxTriesPerStep: 3, stepMaxSec: 150, action: 'hint → easier → skip' },
-    today:       { order: ['hear', 'sing', 'find', 'play', 'read', 'write', 'reward'], readQs: 3, quizWarmup: 4 },
+    // Today follows her class order: listen → sing → find it → play → read.
+    // Each step pays its strawberries once per day; a replay only tops up to
+    // the step's best (never past `max`). Optional steps may be skipped.
+    today:       { order: ['hear', 'sing', 'find', 'play', 'read', 'write', 'reward'], readQs: 3,
+                   rewards: { hear: 1, sing: 1, find: 3, play: 3, read: 3, write: 1 } },
+    sing:        { listenSec: 6, quietSec: 1.5, maxTries: 3 },
     play:        { points: { great: 100, good: 75, ok: 40, wrong: 0, miss: 0 }, berries: [30, 60, 85] },
     features:    { write: false },        // Writing joins Today in PR5
   };
