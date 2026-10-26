@@ -1189,7 +1189,7 @@
   (() => {
     const b = $('#gReset'); let armed = 0;
     b.addEventListener('click', () => {
-      if(Date.now() - armed < 3000){ const keep = state.settings; state = load(); state.songs = {}; state.quiz = {}; state.days = []; state.berries = 0; delete state.today; state.settings = keep; save(); b.textContent = 'Reset all progress…'; drawGrown(); toast('Progress cleared'); armed = 0; return; }
+      if(Date.now() - armed < 3000){ const keep = state.settings; state = load(); state.songs = {}; state.quiz = {}; state.days = []; state.berries = 0; delete state.today; delete state.grants; state.settings = keep; save(); b.textContent = 'Reset all progress…'; drawGrown(); toast('Progress cleared'); armed = 0; return; }
       armed = Date.now(); b.textContent = 'Tap again to clear everything';
       setTimeout(() => { if(Date.now() - armed >= 2900) b.textContent = 'Reset all progress…'; }, 3100);
     });

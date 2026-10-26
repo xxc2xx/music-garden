@@ -253,9 +253,10 @@ await atest('Play!: a wrong key with nothing right after is logged as the wrong 
   return (first && first.outcome === 'wrong' && first.observed && first.observed.m !== r.tg[0].m && first.evidence === 'clock')
     || 'first attempt: ' + JSON.stringify(first && { outcome: first.outcome, observed: first.observed, evidence: first.evidence });
 });
-test('Reset all progress also forgets an unfinished Today', { seed: { garden_v1: JSON.stringify({ today: { day: todayKey, song: 'drm', i: 1, berries: 1, done: false }, berries: 4 }) } }, (env) => {
+test('Reset all progress also forgets an unfinished Today and today\'s paid rewards', { seed: { garden_v1: JSON.stringify({ today: { day: todayKey, song: 'drm', i: 1, berries: 1, done: false }, grants: { day: todayKey, keys: { 'song:drd:learn': 1 } }, berries: 4 }) } }, (env) => {
   env.$('gReset').click(); env.$('gReset').click();
-  return env.win.Garden._state().today === undefined || 'Today snapshot survived the reset';
+  const s = env.win.Garden._state();
+  return (s.today === undefined && s.grants === undefined) || 'survived the reset: ' + JSON.stringify({ today: s.today, grants: s.grants });
 });
 
 // ── Today V2 (PR4): hear → sing → find → play → read, rewards once per step ──
