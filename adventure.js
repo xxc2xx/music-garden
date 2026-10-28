@@ -61,7 +61,10 @@
     $('#advTitle').textContent = level.title;
     $('#advSum').hidden = true;
     $('#advMsg').textContent = '';
-    B.buildPiano($('#advPiano'), 55, 67, { labels: B.S().labels });     // G3–G4, Do is the 4th key
+    // G3–G4 (Do is the 4th key); a left-hand tune gets the octave below (G2–G3)
+    const lo = Math.min(...level.notes.map(n => n.m)) < 55 ? 43 : 55;
+    adv.keys = [lo, lo + 12];
+    B.buildPiano($('#advPiano'), lo, lo + 12, { labels: B.S().labels });
     B.setSink((m, t, src) => onKey(m, src));
     sizeCanvas();
     startMic();
@@ -272,6 +275,15 @@
     const st = B.state(), keys = (st.grants && st.grants.keys) || {};
     return GC.SONGS.find(s => !keys['adv:adv_' + s.id]) || GC.SONGS[0];
   }
+  // the page goes to the background: close the mic (it must never listen
+  // unseen); coming back reopens it if the level is still going
+  function onVisibility(hidden){
+    if(!adv) return;
+    if(hidden){ micStop(); try{ Sound.cancel('adv'); }catch(e){} }
+    else if(adv.state !== 'end' && !adv.mic && adv.micState !== 'denied' && adv.micState !== 'none'){ startMic(); if(adv.state === 'turn'){ setState('hear'); hearNote(); } }
+  }
+  document.addEventListener('visibilitychange', () => onVisibility(document.hidden));
+
   // the level row on Home: one per book phrase, a tick once she has finished it today
   function renderLevels(){
     const box = $('#advLevels'); if(!box) return;
@@ -310,5 +322,5 @@
     };
     requestAnimationFrame(tick);
   })();
-  window.Adventure = { open, _state: () => adv, _last: () => done.last, _judge: (ok) => judge(ok, { skill: 'motor', evidence: 'clock' }) };
+  window.Adventure = { open, _visibility: onVisibility, _state: () => adv, _last: () => done.last, _judge: (ok) => judge(ok, { skill: 'motor', evidence: 'clock' }) };
 })();

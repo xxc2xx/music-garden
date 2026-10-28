@@ -477,5 +477,19 @@ await atest('Adventure: Home mid-level closes the mic and stops the level', { au
   return (env.mic.live === 0 && st(env) === null && env.$('home').hidden === false) || `mic=${env.mic.live} state=${st(env) && st(env).state}`;
 });
 
+await atest('Adventure: page hidden mid-level closes the mic; back again reopens it', { audio: true }, async (env) => {
+  await openLevel(env); await untilTurn(env);
+  if(env.mic.live !== 1) return 'mic not open';
+  AV(env)._visibility(true); await flush();
+  const hidden = env.mic.live;
+  AV(env)._visibility(false); await flush(); env.advance(100); await flush();
+  return (hidden === 0 && env.mic.live === 1) || `hidden → live=${hidden}, back → live=${env.mic.live}`;
+});
+await atest('Adventure: the left-hand level gets keys low enough to finish it (G2–G3)', { audio: true, micDenied: true }, async (env) => {
+  AV(env).open(env.win.GardenCore.SONGS.find(s => s.id === 'low')); await flush(); env.advance(100); await flush();
+  const [lo, hi] = st(env).keys, notes = st(env).level.notes.map(n => n.m);
+  return (notes.every(m => m >= lo && m <= hi)) || `keys ${lo}–${hi} miss notes ${notes.filter(m => m < lo || m > hi)}`;
+});
+
 console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');
 process.exit(fail ? 1 : 0);
