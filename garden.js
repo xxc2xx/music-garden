@@ -382,7 +382,7 @@
     };
   }
   let life = makeLife();
-  const SCREENS = ['home', 'book', 'song', 'quiz', 'sing', 'done', 'free', 'grown'];
+  const SCREENS = ['home', 'book', 'song', 'quiz', 'sing', 'adventure', 'done', 'free', 'grown'];
   function show(id){
     life.end(); life = makeLife();
     stopRun(); micStop();
@@ -1231,4 +1231,14 @@
   window.Garden = { SONGS, targetsOf, songBeats, verdictOf, scoreOf, berriesFor, timingSummary, distractors, staffSvg, WIN, POINTS,
     _state: () => state, _press: (m, src) => pressed(m, src || 'screen'), _run: () => run, _diag: diag, _errors: () => errors.slice(),
     _todayNext: () => todayNext(), _plan: () => (today ? today.plan : null) };
+  // the pieces Melody Adventure (adventure.js) builds on — one audio context,
+  // one input hub, one practice log, one reward basket
+  window.Garden.bridge = {
+    MC, show, life: () => life, actx, say, chime, boop, playTone, track, close, buildPiano, S, nameOf, shortOf, inkOn,
+    grantOnce, berriesFor, noteError, toast, state: () => state, save,
+    setSink: (fn) => { sink = fn; },
+    mute: (sec) => { muteUntil = Math.max(muteUntil === Infinity ? 0 : muteUntil, now() + sec); },
+    muted: () => now() < muteUntil,
+    now,
+  };
 })();

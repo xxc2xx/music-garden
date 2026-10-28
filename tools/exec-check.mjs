@@ -42,7 +42,8 @@ function makeEnv(opts){
     setAttribute(k, v){ this.attrs[k] = String(v); } getAttribute(k){ return k in this.attrs ? this.attrs[k] : null; } removeAttribute(k){ delete this.attrs[k]; }
     getBoundingClientRect(){ return { left: 0, top: 0, width: 100, height: 100 }; } getBBox(){ return { x: 0, y: 0, width: 10, height: 10 }; }
     setPointerCapture(){} releasePointerCapture(){} focus(){} remove(){}
-    getContext(){ return { font: '', measureText: () => ({ actualBoundingBoxAscent: 75, actualBoundingBoxDescent: 25, actualBoundingBoxLeft: 0 }) }; }
+    getContext(){ const noop = () => {}; return { font: '', measureText: () => ({ actualBoundingBoxAscent: 75, actualBoundingBoxDescent: 25, actualBoundingBoxLeft: 0 }),
+      fillRect: noop, clearRect: noop, fillText: noop, strokeText: noop, beginPath: noop, arc: noop, fill: noop, stroke: noop, moveTo: noop, lineTo: noop }; }
     play(){ return Promise.resolve(); } pause(){}
   }
   const homes = [0, 1, 2, 3].map(i => new El('button', 'home' + i));
@@ -392,6 +393,88 @@ await atest('G8: replaying a song in free play pays the taking-part strawberry o
   learn(); const first = berries(env);
   learn(); learn();
   return (first >= 1 && berries(env) === first) || `first Learn paid ${first}, two replays paid ${berries(env) - first} more`;
+});
+
+// ── Melody Adventure: she walks to each note, sings it, jumps over it ──
+const AV = (env) => env.win.Adventure;
+const st = (env) => AV(env)._state();
+async function untilTurn(env, maxMs){
+  for(let t = 0; t < (maxMs || 12000); t += 50){ if(st(env) && st(env).state === 'turn' && st(env).tState > 0.1) return true; env.advance(50); await flush(); }
+  return false;
+}
+async function sing(env, m, ms){ env.mic.freq = NOTES[m] * (m < 60 ? 1 : 1); env.advance(ms || 400); env.mic.freq = null; env.advance(200); await flush(); }
+async function openLevel(env){ env.$('advPlay').click(); await flush(); env.advance(100); await flush(); }
+
+await atest('Adventure: a whole level sung right — 9 jumps, summary 9/9, mic-verified', { audio: true }, async (env) => {
+  const A = memLearn(env);
+  await openLevel(env);
+  if(env.$('adventure').hidden !== false) return 'adventure screen not shown';
+  if(env.mic.live !== 1) return 'mic not open for the level';
+  const names = [];
+  for(let k = 0; k < 9; k++){
+    if(!await untilTurn(env)) return `never reached her turn at note ${k + 1} (state ${st(env) && st(env).state})`;
+    const n = st(env).level.notes[st(env).i]; names.push(n.name);
+    await sing(env, n.m);
+    if(st(env) && st(env).i !== k + 1 && !(env.$('advSum').hidden === false)) return `note ${k + 1} (${n.name}) not passed after singing it; i=${st(env).i}`;
+  }
+  for(let t = 0; t < 15000 && env.$('advSum').hidden !== false; t += 100){ env.advance(100); await flush(); }
+  if(env.$('advSum').hidden !== false) return 'no summary at the end';
+  const last = AV(env)._last();
+  const sung = [...A.data.attempts.values()].filter(a => a.skill === 'echo');
+  return (last.summary.hit === 9 && last.summary.first === 9 && String(env.$('advHit').textContent) === '9' && sung.length === 9 && sung.every(a => a.evidence === 'mic-verified' && a.outcome === 'correct') && env.mic.live === 0)
+    || 'end: ' + JSON.stringify({ sum: last && last.summary, names, sung: sung.map(a => a.outcome + '/' + a.evidence), mic: env.mic.live });
+});
+
+await atest('Adventure: silence never makes her jump', { audio: true }, async (env) => {
+  await openLevel(env);
+  if(!await untilTurn(env)) return 'no turn';
+  env.advance(25000); await flush();
+  return (st(env).i === 0 && st(env).results.length === 0 && st(env).state !== 'jump') || `moved on in silence: i=${st(env).i}`;
+});
+
+await atest('Adventure: one long Do held across Do→Do counts once', { audio: true }, async (env) => {
+  await openLevel(env);
+  for(let k = 0; k < 2; k++){ await untilTurn(env); await sing(env, st(env).level.notes[st(env).i].m); }      // Do, Re
+  await untilTurn(env);                                         // note 3 = Do; note 4 = Do again
+  env.mic.freq = NOTES[60];
+  for(let t = 0; t < 9000; t += 50){ env.advance(50); await flush(); }      // she never stops singing Do
+  const passed = st(env).i;
+  env.mic.freq = null; env.advance(300); await flush();
+  if(!await untilTurn(env)) return 'no turn for note 4';
+  await sing(env, 60);
+  return (passed === 3 && st(env).i === 4) || `held Do passed ${passed - 2} note(s) (want 1); after a breath i=${st(env).i}`;
+});
+
+await atest('Adventure: an off note = stumble, the note stays, then the right one counts (not first try)', { audio: true }, async (env) => {
+  await openLevel(env);
+  await untilTurn(env);
+  await sing(env, 64);                                          // Mi for Do
+  const afterMiss = { i: st(env).i, state: st(env).state };
+  if(!await untilTurn(env)) return 'no retry turn';
+  await sing(env, 60);
+  const r = st(env).results[0];
+  return (afterMiss.i === 0 && afterMiss.state === 'stumble' && r && r.firstTry === false && st(env).i === 1) || 'got ' + JSON.stringify({ afterMiss, r });
+});
+
+await atest('Adventure: mic denied → keys play the level (exact note)', { audio: true, micDenied: true }, async (env) => {
+  await openLevel(env);
+  for(let k = 0; k < 9; k++){
+    if(!await untilTurn(env)) return `no turn at ${k + 1}`;
+    const n = st(env).level.notes[st(env).i];
+    if(k === 1){ G(env)._press(n.m + 12); env.advance(800); await flush(); await untilTurn(env); }   // right name, wrong octave = miss on keys
+    G(env)._press(n.m);
+    env.advance(100); await flush();
+  }
+  for(let t = 0; t < 15000 && env.$('advSum').hidden !== false; t += 100){ env.advance(100); await flush(); }
+  const sm = AV(env)._last() && AV(env)._last().summary;
+  return (sm && sm.hit === 9 && sm.first === 8 && /No microphone/.test(env.$('advMic').textContent)) || 'got ' + JSON.stringify({ sm, mic: env.$('advMic').textContent });
+});
+
+await atest('Adventure: Home mid-level closes the mic and stops the level', { audio: true }, async (env) => {
+  await openLevel(env);
+  await untilTurn(env);
+  env.homes[0].click(); env.advance(3000); await flush();
+  return (env.mic.live === 0 && st(env) === null && env.$('home').hidden === false) || `mic=${env.mic.live} state=${st(env) && st(env).state}`;
 });
 
 console.log(fail ? `\nEXEC CHECK FAIL (${fail})` : '\nEXEC CHECK PASS');

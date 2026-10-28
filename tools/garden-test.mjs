@@ -86,5 +86,52 @@ ok(odd.rewarded.play === 3 && !('hear' in odd.rewarded) && !('ghost' in odd.rewa
 ok(G.singPattern(G.SONGS.find(s => s.id === 'hcb')).join() === '64,62,60' && G.singPattern(G.SONGS.find(s => s.id === 'hill')).join() === '60,62,64,65', 'sing pattern = opening phrase, 2–4 notes');
 ok(G.SONGS.every(s => { const n = G.singPattern(s).length; return n >= 2 && n <= 4; }), 'every song has a 2–4 note sing pattern');
 
+// Melody Adventure (adventure-core.js)
+globalThis.GardenCore = G;
+const A = require('../adventure-core.js');
+const lv = A.levelFrom(G.SONGS[0]);
+ok(lv.notes.map(n => n.name).join(' ') === 'Do Re Do Do Re Do Do Re Do', `Do Re Do level = phrase ×3: ${lv.notes.map(n => n.name).join(' ')}`);
+const tunes = G.SONGS.map(sg => A.levelFrom(sg).notes.map(n => n.m).join());
+ok(new Set(tunes).size === G.SONGS.length, 'every level is a different tune');
+ok(G.SONGS.every(sg => { const n = A.levelFrom(sg).notes.length; return n >= 9 && n <= 16; }), `levels are 9–16 notes: ${G.SONGS.map(sg => A.levelFrom(sg).notes.length)}`);
+const hz = (m, cents) => 440 * 2 ** ((m - 69 + (cents || 0) / 100) / 12);
+const feed = (mt, frames) => { const out = []; frames.forEach(f => { const r = mt.push(f); if(r) out.push(r); }); return out; };
+const tone = (t0, ms, f, cl) => Array.from({ length: Math.floor(ms / 20) }, (_, k) => ({ t: t0 + k * 20, freq: f, clarity: cl == null ? 0.95 : cl }));
+const quiet = (t0, ms) => Array.from({ length: Math.floor(ms / 20) }, (_, k) => ({ t: t0 + k * 20, freq: null, clarity: 0 }));
+let mt = A.matcher(60);
+ok(feed(mt, quiet(0, 3000)).length === 0, 'silence never makes a judgement (no jump in silence)');
+mt = A.matcher(60);
+let ar = feed(mt, tone(0, 400, hz(60, 30)));
+ok(ar.length === 1 && ar[0].ok && Math.abs(ar[0].cents - 30) <= 2, `a steady Do 30 cents sharp = one hit (${JSON.stringify(ar)})`);
+mt = A.matcher(60);
+ok(feed(mt, tone(0, 3000, hz(60))).length === 1, 'one long held Do counts ONCE, however long');
+mt = A.matcher(60); feed(mt, tone(0, 400, hz(60)));
+mt.setTarget(60);
+ok(feed(mt, tone(400, 600, hz(60))).length === 0, 'Do→Do: the same held sound cannot pass the next Do');
+ok(feed(mt, quiet(1000, 120).concat(tone(1120, 300, hz(60)))).length === 1, '…a breath then a fresh Do does');
+mt = A.matcher(60);
+ar = feed(mt, tone(0, 300, hz(72)));
+ok(ar.length === 1 && ar[0].ok, 'singing an octave up still matches (octave-forgiving for voice)');
+mt = A.matcher(60);
+ar = feed(mt, tone(0, 300, hz(62)));
+ok(ar.length === 1 && !ar[0].ok && ar[0].cents === 200, 'singing Re for Do = a clear miss (200 cents off)');
+mt = A.matcher(60);
+ar = feed(mt, tone(0, 300, hz(60, 90)));
+ok(ar.length === 1 && !ar[0].ok, 'beyond ±75 cents is a miss');
+mt = A.matcher(60);
+ok(feed(mt, tone(0, 300, hz(60), 0.5)).length === 0, 'unclear sound (low clarity) is ignored, never judged wrong');
+mt = A.matcher(60);
+ok(feed(mt, tone(0, 100, hz(60))).length === 0, 'a blip shorter than 120 ms does not count');
+ok(A.judgeKey(60, 60) && !A.judgeKey(72, 60), 'keys / MIDI need the exact note, octave included');
+mt = A.matcher(60); feed(mt, tone(0, 300, hz(60)));            // Do judged…
+mt.setTarget(60); tone(300, 1500, hz(60)).forEach(f => mt.observe(f));   // …she keeps holding through the app's note
+ok(feed(mt, tone(1800, 800, hz(60))).length === 0, 'Do held through the app\'s next Do: still ONE note (observe keeps it held)');
+quiet(2600, 120).forEach(f => mt.observe(f));
+ok(feed(mt, tone(2720, 300, hz(60))).length === 1, '…after a real breath the next Do counts');
+const res = lv.notes.map((n, i) => ({ m: n.m, firstTry: n.name !== 'Re' || i !== 1 }));
+const sm = A.summary(lv, res);
+ok(sm.hit === 9 && sm.first === 8 && sm.pct === 89 && /practise Re/.test(sm.line), `summary: ${sm.hit}/${sm.total} hit, ${sm.pct}% first try — "${sm.line}"`);
+ok(sm.chips.find(c => c.name === 'Re').matched === false && sm.chips.find(c => c.name === 'Do').matched === true, 'per-note chips: Do matched, Re to practise');
+
 console.log(fail ? `\nGARDEN TEST FAIL (${fail})` : '\nGARDEN TEST PASS');
 process.exit(fail ? 1 : 0);

@@ -44,6 +44,17 @@ press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
   Only the note name is judged, not the octave.
 - **Note quiz**: name the note / which staff is X / name the shining note in
   a song; weighted toward notes she misses; bass clef is a grown-up toggle.
+- **Melody Adventure** (Home's Play, 2026-10-28): a 2D pixel side-scroller.
+  The generic GroovyG sprite (from Beat Hive, never her likeness) walks to
+  each note of a book tune; the app plays it (mic muted), then listens.
+  Right note → she jumps over it and the name pops up like a coin; clear miss
+  → stumble, the note stays; silence → nothing. One level per book song, each
+  a different tune (3–4 notes ×3, ≤8 ×2, longer once). Pure logic +
+  matcher in `adventure-core.js` (±75 cents, ≥120 ms stable, a fresh onset
+  per note — a held note never counts twice; voice octave-forgiving, keys /
+  MIDI exact); scene + mic in `adventure.js` (vanilla canvas, 240×135,
+  pixelated) via `Garden.bridge`. Summary: hits, first-try %, per-note chips.
+  Rhythm mode (notes on the beat) = later.
 - **Today** (class order, one song): Listen → Sing it back → Learn (find the
   notes) → Play! → read 3 notes. Sing is optional: the mic opens only while
   she sings and judges the tune's shape (mic-verified / uncertain); no mic or
@@ -73,7 +84,7 @@ press-and-hold. Unicorn / bunny / strawberry art is inline SVG symbols in
   (`~/busy-brain/claude-config/hooks/codex-review-run.sh ~/music-garden`) →
   push `dev` → `tools/stage.sh ~/music-garden dev <files…>` →
   `git -C $TMPDIR/stage-music-garden push origin HEAD:main`.
-  Files: index.html garden.js garden-core.js garden-rules.js music-core.js hear.js midi.js sound.js echo.js sw.js manifest.json icon-192.png icon-512.png
+  Files: index.html garden.js garden-core.js garden-rules.js adventure-core.js adventure.js music-core.js hear.js midi.js sound.js echo.js sw.js manifest.json icon-192.png icon-512.png
 - Bump `CACHE` in `sw.js` when the file list changes; add new scripts to `STATIC`.
 - Tunes come from her book's exercises; use our own titles and no book lyrics
   or scans (Yamaha copyright).

@@ -60,6 +60,30 @@ h2{font-size:clamp(24px,4vw,36px);line-height:1.15}
 .bigplay svg{width:100%;height:100%;filter:drop-shadow(0 10px 0 rgba(178,31,56,.35))}
 .bigplay .lbl{position:absolute;left:0;right:0;bottom:-6px;font-size:clamp(22px,4vmin,32px);font-weight:800;color:var(--ink)}
 .bigplay:active{transform:translateY(6px)}
+.advhero{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(12px,2.6vh,26px)}
+#advHero{width:min(46vw,288px);height:auto;aspect-ratio:96/42;image-rendering:pixelated}
+.advlogo{font-size:clamp(30px,6vw,52px);letter-spacing:.5px;color:var(--ink);text-shadow:3px 3px 0 #FFB3CF}
+.advplay{min-height:92px;padding:0 56px;border:none;border-radius:20px;background:#F0348A;color:#fff;font-size:clamp(30px,5vw,42px);font-weight:800;
+  box-shadow:0 8px 0 #A81E5E,inset 0 -6px 0 rgba(0,0,0,.12);image-rendering:pixelated}
+.advplay:active{transform:translateY(6px);box-shadow:0 2px 0 #A81E5E}
+.advlevels{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:760px}
+.advlevel{min-width:64px;min-height:56px;padding:4px 10px;border:3px solid var(--ink);border-radius:12px;background:#fff;font-weight:800;font-size:15px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.advlevel small{font-size:11px;font-weight:700;color:var(--muted)}
+.advlevel.done{background:#E9FBE4}
+.advstage{position:relative;width:100%;max-width:1100px;align-self:center}
+#advCanvas{display:block;margin:0 auto;height:min(58vh,calc(100dvh - 400px),calc((100vw - 32px) * 9 / 16));width:auto;max-width:100%;aspect-ratio:16/9;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:14px;background:#CDB8FF}
+.advmsg{position:absolute;left:0;right:0;top:8px;min-height:0;color:var(--ink);text-shadow:0 1px 0 #fff}
+.advsum{position:absolute;inset:0;margin:auto;max-width:620px;height:fit-content;max-height:100%;overflow:auto;background:#fff;border:4px solid var(--ink);border-radius:18px;padding:18px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 0 rgba(58,46,79,.25)}
+.advsum[hidden]{display:none}
+.advstats{display:flex;gap:clamp(14px,4vw,40px)}
+.advstats div{display:flex;flex-direction:column;align-items:center}
+.advstats b{font-size:clamp(30px,6vw,46px);line-height:1}
+.advstats span{font-size:14px;font-weight:700;color:var(--muted)}
+.advchips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.advchip{display:flex;flex-direction:column;align-items:center;min-width:76px;padding:6px 10px;border-radius:12px;border:3px solid var(--c);font-size:13px;font-weight:700}
+.advchip b{font-size:20px;color:var(--c)}
+.advchip.again{background:#FFF4D6}
+#advPiano{max-width:1100px}
 .tiles{display:flex;gap:clamp(10px,2vw,18px);flex-wrap:wrap;justify-content:center;margin-bottom:6px}
 .tile{width:clamp(118px,19vw,168px);min-height:96px;border-radius:24px;border:3px solid var(--ink);background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:clamp(17px,2.4vw,21px);font-weight:800;box-shadow:0 5px 0 var(--ink)}
 .tile:active{transform:translateY(4px);box-shadow:0 1px 0 var(--ink)}
@@ -270,15 +294,17 @@ svg.staff .wob{animation:wob .4s}
         Grown-ups
       </button>
     </div>
-    <div class="hero">
-      <svg class="guide" viewBox="0 0 220 240" aria-hidden="true"><use href="#i-unicorn"/></svg>
-      <button class="bigplay" id="play" type="button" aria-label="Play today">
-        <svg viewBox="0 0 100 110" aria-hidden="true"><use href="#i-berry"/><path d="M41 52v28l22-14z" fill="#fff" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>
-        <span class="lbl">Play today</span>
-      </button>
-      <svg class="guide bunny" viewBox="0 0 170 240" aria-hidden="true"><use href="#i-bunny"/></svg>
+    <div class="advhero">
+      <canvas id="advHero" width="96" height="42" aria-hidden="true"></canvas>
+      <h1 class="advlogo">Melody Adventure</h1>
+      <button class="advplay" id="advPlay" type="button"><span aria-hidden="true">▶</span> Play</button>
+      <div class="advlevels" id="advLevels" aria-label="Levels"></div>
     </div>
     <div class="tiles">
+      <button class="tile" type="button" id="play">
+        <svg viewBox="0 0 48 40" aria-hidden="true"><circle cx="24" cy="20" r="16" fill="#FFB3CF" stroke="#3A2E4F" stroke-width="3"/><path d="M20 13v14l11-7z" fill="#3A2E4F"/></svg>
+        Today's lesson
+      </button>
       <button class="tile" type="button" id="tBook">
         <svg viewBox="0 0 48 40" aria-hidden="true"><rect x="3" y="4" width="42" height="32" rx="5" fill="#fff" stroke="#3A2E4F" stroke-width="3"/><path d="M9 14h30M9 19h30M9 24h30M9 29h30" stroke="#3A2E4F" stroke-width="1.6"/><ellipse cx="18" cy="26.5" rx="3.6" ry="2.6" fill="#E5384F"/><ellipse cx="28" cy="21.5" rx="3.6" ry="2.6" fill="#FB8C00"/></svg>
         My book
@@ -354,6 +380,26 @@ svg.staff .wob{animation:wob .4s}
       <button class="ghostbtn" type="button" id="singSkip">Skip</button>
       <button class="go" type="button" id="singNext" hidden>Next</button>
     </div>
+  </section>
+
+  <!-- MELODY ADVENTURE -->
+  <section class="screen" id="adventure" hidden>
+    <div class="bar">
+      <button class="sq home" type="button" aria-label="Home"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3A2E4F" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+      <div class="title" id="advTitle"></div>
+      <span class="inputchip" id="advMic"></span>
+    </div>
+    <div class="advstage"><canvas id="advCanvas" width="240" height="135" aria-label="Melody Adventure: she walks to each note and jumps over it when you sing it"></canvas>
+      <div class="feedback advmsg" id="advMsg" role="status"></div>
+      <div class="advsum" id="advSum" hidden>
+        <h2>Melody complete!</h2>
+        <div class="advstats"><div><b id="advHit">0</b><span>Notes hit</span></div><div><b id="advTotal">0</b><span>Total notes</span></div><div><b id="advPct">0%</b><span>First try</span></div></div>
+        <div class="advchips" id="advChips"></div>
+        <p class="sub" id="advLine"></p>
+        <div class="btnrow"><button class="go" type="button" id="advNext">Next level</button><button class="ghostbtn" type="button" id="advAgain">Again</button><button class="ghostbtn" type="button" id="advHome">Home</button></div>
+      </div>
+    </div>
+    <div class="piano" id="advPiano"></div>
   </section>
 
   <!-- DONE -->
@@ -446,5 +492,7 @@ svg.staff .wob{animation:wob .4s}
 <script src="garden-rules.js"></script>
 <script src="garden-core.js"></script>
 <script src="garden.js"></script>
+<script src="adventure-core.js"></script>
+<script src="adventure.js"></script>
 </body>
 </html>
